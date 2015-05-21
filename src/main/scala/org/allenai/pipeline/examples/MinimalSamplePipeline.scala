@@ -1,4 +1,4 @@
-package org.allenai.pipeline
+package org.allenai.pipeline.examples
 
 import java.io.{FileWriter, PrintWriter, File}
 import java.nio.file.Files
@@ -20,43 +20,15 @@ class MinimalSamplePipeline extends Pipeline {
     new File(new File(dirCurrent), "minimalSamplePipeline-out")
   }
 
-  // BEGIN scratchDir: copy paste from trait ScratchDirectory,
-  // but without the UnitTest part.
-  val scratchDir: File = {
-    val dir = Files.createTempDirectory(this.getClass.getSimpleName).toFile
-    sys.addShutdownHook(delete(dir))
-    dir
-  }
-
-  def beforeAll: Unit = require(
-    scratchDir.exists && scratchDir.isDirectory,
-    s"Unable to create scratch directory $scratchDir"
-  )
-
-  def afterAll: Unit = delete(scratchDir)
-
-  private def delete(f: File) {
-    if (f.isDirectory()) {
-      f.listFiles.foreach(delete)
-    }
-    f.delete()
-  }
-  // END scratchDir
-
-
   // from org.allenai.pipeline.Pipeline.saveToFileSystem
   override def tryCreateArtifact[A <: Artifact: ClassTag] =
     CreateFileArtifact.relativeToDirectory[A](outDir) orElse
       super.tryCreateArtifact[A]
   
-  val inputDir = new File("src/test/resources/pipeline/MinimalSamplePipeline")
-
   val pipeline = Pipeline.saveToFileSystem(outDir)
 
   def run(isDryRun:Boolean) = {
-    val docDir = new DirectoryArtifact(new File(inputDir, "xml"))
-
-    // BEGIN copy-paste from: it should "read input files":
+    // BEGIN copy-paste from test: it should "read input files":
     val dir = new File(outDir, "testCopy")
     dir.mkdirs()
     val inputFile = new File(dir, "input")
@@ -75,6 +47,7 @@ class MinimalSamplePipeline extends Pipeline {
     // END from: it should "read input files":
 
     if(isDryRun)
+      // TODO: note, this version is currently broken
       pipeline.dryRun(new File(dir, "dry-run-output"),"MinimalSamplePipeline")
     else
       pipeline.runOnly("MinimalSamplePipeline", copy)
@@ -87,11 +60,9 @@ object MinimalSamplePipeline {
     val isDryRun = args.contains("--dry-run")
     val that = new MinimalSamplePipeline()
     try {
-      that.beforeAll
       that.run(isDryRun)
     }
     finally {
-      that.afterAll
     }
   }
 }
