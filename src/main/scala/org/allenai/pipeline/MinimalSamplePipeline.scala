@@ -11,8 +11,14 @@ import org.apache.commons.io.FileUtils
 import spray.json.DefaultJsonProtocol._
 
 import scala.io.Source
+import scala.reflect.ClassTag
 
 class MinimalSamplePipeline extends Pipeline {
+
+  def outDir() : File = {
+    val dirCurrent = System.getProperty("user.dir");
+    new File(new File(dirCurrent), "minimalSamplePipeline-out")
+  }
 
   // BEGIN scratchDir: copy paste from trait ScratchDirectory,
   // but without the UnitTest part.
@@ -37,14 +43,21 @@ class MinimalSamplePipeline extends Pipeline {
   }
   // END scratchDir
 
-  val inputDir = new File("src/test/resources/pipeline")
 
+  // from org.allenai.pipeline.Pipeline.saveToFileSystem
+  override def tryCreateArtifact[A <: Artifact: ClassTag] =
+    CreateFileArtifact.relativeToDirectory[A](outDir) orElse
+      super.tryCreateArtifact[A]
+  
+  val inputDir = new File("src/test/resources/pipeline/MinimalSamplePipeline")
+
+  val pipeline = Pipeline.saveToFileSystem(outDir)
 
   def run(isDryRun:Boolean) = {
     val docDir = new DirectoryArtifact(new File(inputDir, "xml"))
 
     // BEGIN copy-paste from: it should "read input files":
-    val dir = new File(scratchDir, "testCopy")
+    val dir = new File(outDir, "testCopy")
     dir.mkdirs()
     val inputFile = new File(dir, "input")
     val outputFile = new File(dir, "output")
@@ -64,7 +77,7 @@ class MinimalSamplePipeline extends Pipeline {
     if(isDryRun)
       pipeline.dryRun(new File(dir, "dry-run-output"),"MinimalSamplePipeline")
     else
-      pipeline.run("MinimalSamplePipeline")
+      pipeline.runOnly("MinimalSamplePipeline", copy)
   }
 
 }
