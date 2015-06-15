@@ -1,6 +1,6 @@
 package org.allenai.pipeline
 
-import java.io.{ ByteArrayInputStream, File, FileWriter, InputStream }
+import java.io._
 import java.nio.file.Files
 import java.util.UUID
 
@@ -39,12 +39,12 @@ class ExternalProcess(val commandTokens: CommandToken*) {
       import scala.sys.process._
       val captureStdoutFile = new File(scratchDir, "stdout")
       val captureStderrFile = new File(scratchDir, "stderr")
-      val out = new FileWriter(captureStdoutFile)
-      val err = new FileWriter(captureStderrFile)
+      val out = new PrintWriter(captureStdoutFile)
+      val err = new PrintWriter(captureStderrFile)
 
       val logger = ProcessLogger(
-        (o: String) => out.append(o),
-        (e: String) => err.append(e)
+        (o: String) => out.println(o),
+        (e: String) => err.println(e)
       )
 
       prepareInputPaths(ab, scratchDir)

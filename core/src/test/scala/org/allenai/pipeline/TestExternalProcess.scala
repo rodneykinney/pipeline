@@ -170,7 +170,7 @@ class TestExternalProcess extends UnitSpec with ScratchDirectory {
     val echo = new ExternalProcess("echo", "hello", "world")
     val wc = new ExternalProcess("wc", "-c")
     val result = wc.run(Seq(), stdinput = echo.run(Seq()).stdout)
-    IOUtils.readLines(result.stdout()).asScala.head.trim().toInt should equal(11)
+    IOUtils.readLines(result.stdout()).asScala.head.trim().toInt should equal(12)
   }
 
   def consumeExtargForCoerceTest(absdScript: String, a: Extarg) = {
