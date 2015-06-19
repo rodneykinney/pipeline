@@ -8,7 +8,7 @@ import spray.json._
 import scala.reflect.ClassTag
 
 /** Utility methods for Artifact reading/writing.  */
-object IoHelpers extends ColumnFormats {
+object IoHelpers extends ColumnFormats with Implicits {
 
   object Read {
     /** General deserialization method. */
@@ -75,23 +75,4 @@ object IoHelpers extends ColumnFormats {
       }
     }
   }
-  import scala.language.implicitConversions
-
-  implicit def asFileArtifact(f: File) = new FileArtifact(f)
-  implicit def asStructuredArtifact(f: File): StructuredArtifact = f match {
-    case f if f.exists && f.isDirectory => new DirectoryArtifact(f)
-    case _ => new ZipFileArtifact(f)
-  }
-  implicit def asFlatArtifact(url: URI) =
-    CreateCoreArtifacts.fromFileUrls.urlToArtifact[FlatArtifact].apply(url)
-  implicit def asStructuredArtifact(url: URI) =
-    CreateCoreArtifacts.fromFileUrls.urlToArtifact[StructuredArtifact].apply(url)
-
-  implicit def asStringSerializable[T](jsonFormat: JsonFormat[T]): StringSerializable[T] =
-    new StringSerializable[T] {
-      override def fromString(s: String): T = jsonFormat.read(s.parseJson)
-
-      override def toString(data: T): String = jsonFormat.write(data).compactPrint
-    }
-
 }

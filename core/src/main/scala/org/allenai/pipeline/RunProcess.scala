@@ -1,6 +1,6 @@
 package org.allenai.pipeline
 
-import org.apache.commons.io.FileUtils
+import org.apache.commons.io.{IOUtils, FileUtils}
 
 import scala.io.Source
 
@@ -40,8 +40,8 @@ case class RunProcess(args: ProcessArg*) extends Producer[ProcessOutput] with Ai
     val err = new FileWriter(captureStderrFile)
 
     val logger = ProcessLogger(
-      (o: String) => out.append(o),
-      (e: String) => err.append(e)
+      (o: String) => out.append(o).append('\n'),
+      (e: String) => err.append(e).append('\n')
     )
 
     val command = cmd(scratchDir)
@@ -134,4 +134,11 @@ case class ProcessOutput(
   stderr: FileArtifact,
   outputs: Map[String, FileArtifact]
   )
+
+object CopyFlatArtifact extends ArtifactIo[FlatArtifact, FlatArtifact] with Ai2SimpleStepInfo {
+  override def write(data: FlatArtifact, artifact: FlatArtifact): Unit =
+    data.copyTo(artifact)
+
+  override def read(artifact: FlatArtifact): FlatArtifact = artifact
+}
 
