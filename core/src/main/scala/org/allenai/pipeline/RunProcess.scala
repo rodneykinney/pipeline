@@ -1,28 +1,28 @@
 package org.allenai.pipeline
 
-import org.apache.commons.io.{IOUtils, FileUtils}
+import java.io._
+import java.nio.file.Files
+
+import org.apache.commons.io.FileUtils
 
 import scala.io.Source
 
-import java.io.{ByteArrayInputStream, File, FileWriter, InputStream}
-import java.nio.file.Files
-
 /** Executes an arbitrary system process
-  * @param commandTokens   The set of tokens that comprise the command to be executed.
-  *                        Each token is either:
-  *                        a String
-  *                        a Placeholder representing an input data file
-  *                        a Placeholder representing an output data file
-  *                        Examples:
-  *                        StringToken("cp") InputFileToken("src") OutputFileToken("target")
-  *                        StringToken("python") InputFileToken("script") StringToken("-o") OutputFileToken("output")
+  * @param args   The set of tokens that comprise the command to be executed.
+  *               Each token is either:
+  *               a String
+  *               a Placeholder representing an input data file
+  *               a Placeholder representing an output data file
+  *               Examples:
+  *               StringArg("cp") InputFileArg("data.tsv") OutputFileArg("data-copy.tsv")
+  *               StringArg("python") InputFileArg("run.py") StringArg("-o") OutputFileArg("output.txt")
   *
-  *                        Producers based on ExternalProcess should be created with class RunExternalProcess.
+  *               Producers based on ExternalProcess should be created with class RunExternalProcess.
   */
 
 case class RunProcess(args: ProcessArg*) extends Producer[ProcessOutput] with Ai2SimpleStepInfo {
   {
-    val outputFileNames = args.collect { case arg: OutputFileArg => arg}.map(_.name)
+    val outputFileNames = args.collect { case arg: OutputFileArg => arg }.map(_.name)
     require(outputFileNames.distinct.size == outputFileNames.size, {
       val duplicates = outputFileNames.groupBy(x => x).filter(_._2.size > 1).map(_._1)
       s"Duplicate output names: ${duplicates.mkString("[", ",", "]")}"
@@ -36,34 +36,36 @@ case class RunProcess(args: ProcessArg*) extends Producer[ProcessOutput] with Ai
     import scala.sys.process._
     val captureStdoutFile = new File(scratchDir, "stdout")
     val captureStderrFile = new File(scratchDir, "stderr")
-    val out = new FileWriter(captureStdoutFile)
-    val err = new FileWriter(captureStderrFile)
+    val stdout = new FileWriter(captureStdoutFile)
+    val stderr = new FileWriter(captureStderrFile)
+    val stdInput = args.collect { case arg: StdInput => arg.inputData.get.read }.headOption.getOrElse(new ByteArrayInputStream(Array.emptyByteArray))
 
     val logger = ProcessLogger(
-      (o: String) => out.append(o).append('\n'),
-      (e: String) => err.append(e).append('\n')
+      (o: String) => stdout.append(o).append('\n'),
+      (e: String) => stderr.append(e).append('\n')
     )
 
     val command = cmd(scratchDir)
 
-    val stdInput = args.collect { case arg: StdInput => arg.inputStream.get()}.headOption.getOrElse(new ByteArrayInputStream(Array.emptyByteArray))
-
     val status = (command #< stdInput) ! logger
-    out.close()
-    err.close()
+    stdout.close()
+    stderr.close()
 
-    require(requireStatusCode.contains(status),
-      s"Command $command failed with status $status: ${Source.fromFile(captureStderrFile).getLines.take(100).mkString("\n")}")
+    require(
+      requireStatusCode.contains(status),
+      s"Command $command failed with status $status: ${Source.fromFile(captureStderrFile).getLines.take(100).mkString("\n")}"
+    )
 
     val outputFiles = args.collect {
       case arg: OutputFileArg => (arg.name, new FileArtifact(new File(scratchDir, arg.name)))
     }.toMap
 
-
-    ProcessOutput(status,
+    ProcessOutput(
+      status,
       new FileArtifact(captureStdoutFile),
       new FileArtifact(captureStderrFile),
-      outputFiles)
+      outputFiles
+    )
   }
 
   // Fail if the external process returns with a status code not included in this set
@@ -74,27 +76,38 @@ case class RunProcess(args: ProcessArg*) extends Producer[ProcessOutput] with Ai
   def stdout: Producer[FileArtifact] =
     this.copy(
       create = () => outer.get.stdout,
-      stepInfo = () => PipelineStepInfo("stdout").addParameters("cmd" -> outer))
+      stepInfo = () => PipelineStepInfo("stdout")
+      .addParameters("cmd" -> outer)
+      .copy(outputLocation = Some(outer.get.stdout.url))
+    )
 
   def stderr: Producer[FileArtifact] =
     this.copy(
       create = () => outer.get.stderr,
-      stepInfo = () => PipelineStepInfo("stderr").addParameters("cmd" -> outer))
+      stepInfo = () => PipelineStepInfo("stderr")
+      .addParameters("cmd" -> outer)
+      .copy(outputLocation = Some(outer.get.stderr.url))
+    )
 
   def outputFiles: Map[String, Producer[FileArtifact]] =
     args.collect {
       case OutputFileArg(name) =>
-        (name,
+        (
+          name,
           this.copy(
             create = () => outer.get.outputs(name),
-            stepInfo = () => PipelineStepInfo(name).addParameters("cmd" -> outer)))
+            stepInfo = () => PipelineStepInfo(name)
+            .addParameters("cmd" -> outer)
+            .copy(outputLocation = Some(outer.get.outputs(name).url))
+          )
+        )
     }.toMap
 
   def cmd(scratchDir: File): Seq[String] = {
-    args.map {
+    args.collect {
       case InputFileArg(_, p) => p.get.file.getCanonicalPath
-      case output: OutputFileArg => new File(scratchDir, output.name).getCanonicalPath
-      case arg => arg.name
+      case OutputFileArg(name) => new File(scratchDir, name).getCanonicalPath
+      case StringArg(arg) => arg
     }
   }
 
@@ -122,7 +135,7 @@ case class InputFileArg(name: String, inputFile: Producer[FileArtifact]) extends
 
 case class OutputFileArg(name: String) extends ProcessArg
 
-case class StdInput(inputStream: Producer[() => InputStream]) extends ProcessArg {
+case class StdInput(inputData: Producer[FileArtifact]) extends ProcessArg {
   def name = "stdin"
 }
 
@@ -133,7 +146,7 @@ case class ProcessOutput(
   stdout: FileArtifact,
   stderr: FileArtifact,
   outputs: Map[String, FileArtifact]
-  )
+)
 
 object CopyFlatArtifact extends ArtifactIo[FlatArtifact, FlatArtifact] with Ai2SimpleStepInfo {
   override def write(data: FlatArtifact, artifact: FlatArtifact): Unit =

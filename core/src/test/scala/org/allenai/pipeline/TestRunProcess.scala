@@ -1,10 +1,13 @@
 package org.allenai.pipeline
 
-import org.allenai.common.testkit.{ScratchDirectory, UnitSpec}
+import java.lang.Thread.UncaughtExceptionHandler
+
+import org.allenai.common.Resource
+import org.allenai.common.testkit.{ ScratchDirectory, UnitSpec }
 
 import scala.io.Source
 
-import java.io.File
+import java.io.{ PrintWriter, FileWriter, File }
 
 /** Created by rodneykinney on 5/14/15.
   */
@@ -53,73 +56,77 @@ class TestRunProcess extends UnitSpec with ScratchDirectory {
   //    sig1 should equal(sig2)
   //  }
   //
-    it should "capture stdout" in {
-      val echo =  RunProcess("echo", "hello", "world")
-      val stdout = Source.fromInputStream(echo.stdout.get.read).getLines.mkString("\n")
-      stdout should equal("hello world")
-    }
+  it should "capture stdout" in {
+    val echo = RunProcess("echo", "hello", "world")
+    val stdout = Source.fromInputStream(echo.stdout.get.read).getLines.mkString("\n")
+    stdout should equal("hello world")
+  }
 
-    it should "capture stdout newlines" in {
-      val s = "An old silent pond...\\nA frog jumps into the pond,\\nsplash! Silence again.\\n"
-      val echo = RunProcess("printf", s)
-      val stdoutLines = Source.fromInputStream(echo.stdout.get.read).getLines.toList
-      stdoutLines.size should equal(3)
+  it should "capture stdout newlines" in {
+    val s = "An old silent pond...\\nA frog jumps into the pond,\\nsplash! Silence again.\\n"
+    val echo = RunProcess("printf", s)
+    val stdoutLines = Source.fromInputStream(echo.stdout.get.read).getLines.toList
+    stdoutLines.size should equal(3)
+  }
+
+  it should "capture stderr" in {
+    val noSuchParameter = new RunProcess("touch", "-x", "foo") { override def requireStatusCode = Set(1) }
+    val stderr = Source.fromInputStream(noSuchParameter.stderr.get.read).getLines.mkString("\n")
+    stderr.size should be > 0
+  }
+  it should "throw an exception if command is not found" in {
+    val noSuchCommand = RunProcess("eccho", "hello", "world")
+    val defaultHandler = Thread.getDefaultUncaughtExceptionHandler
+    // Suppress logging of exception by background thread
+    Thread.setDefaultUncaughtExceptionHandler(new UncaughtExceptionHandler {
+      override def uncaughtException(t: Thread, e: Throwable): Unit = ()
+    })
+    an[Exception] shouldBe thrownBy {
+      noSuchCommand.get
     }
-  //
-  //  it should "capture stderr" in {
-  //    val noSuchParameter = new ExternalProcess("touch", "-x", "foo")
-  //    val stderr = IOUtils.readLines(noSuchParameter.run(Seq()).stderr()).asScala.mkString("\n")
-  //    stderr.size should be > 0
-  //  }
-  //  it should "throw an exception if command is not found" in {
-  //    val noSuchCommand = new ExternalProcess("eccho", "hello", "world")
-  //    val defaultHandler = Thread.getDefaultUncaughtExceptionHandler
-  //    // Suppress logging of exception by background thread
-  //    Thread.setDefaultUncaughtExceptionHandler(new UncaughtExceptionHandler {
-  //      override def uncaughtException(t: Thread, e: Throwable): Unit = ()
-  //    })
-  //    an[Exception] shouldBe thrownBy {
-  //      noSuchCommand.run(Seq())
+    // Restore exception handling
+    Thread.setDefaultUncaughtExceptionHandler(defaultHandler)
+  }
+  it should "read input files" in {
+    val dir = new File(scratchDir, "testCopy")
+    dir.mkdirs()
+    val inputFile = new File(dir, "input")
+    val outputFile = new File(dir, "output")
+    Resource.using(new PrintWriter(new FileWriter(inputFile))) {
+      _.println("Some data")
+    }
+    val inputArtifact = new FileArtifact(inputFile)
+    val outputArtifact = new FileArtifact(outputFile)
+
+    val copy = new ProducerWithPersistence(
+      RunProcess(
+        "cp",
+        InputFileArg("input", Producer.fromMemory(inputArtifact)),
+        OutputFileArg("output")
+      )
+        .outputFiles("output"), CopyFlatArtifact, outputArtifact
+    )
+    copy.get
+    outputFile should exist
+    Source.fromFile(outputFile).mkString should equal("Some data\n")
+
+    copy.stepInfo.dependencies.size should equal(1)
+    Workflow.upstreamDependencies(copy).size should equal(2)
+  }
+
+  it should "pipe stdin to stdout" in {
+    val echo = RunProcess("echo", "hello", "world")
+    val wc = RunProcess("wc", "-c", StdInput(echo.stdout))
+    val result = wc.stdout.get
+    Source.fromFile(result.file).mkString.trim.toInt should equal(12)
+  }
+
+  //    def consumeExtargForCoerceTest(absdScript: String, a: Extarg) = {
+  //      RunExternalProcess(ScriptToken("cat"), InputFileToken(""))(
+  //        Seq(a),
+  //        versionHistory = Seq("v1.0")
+  //      )
   //    }
-  //    // Restore exception handling
-  //    Thread.setDefaultUncaughtExceptionHandler(defaultHandler)
-  //  }
-  //  it should "read input files" in {
-  //    val dir = new File(scratchDir, "testCopy")
-  //    dir.mkdirs()
-  //    val inputFile = new File(dir, "input")
-  //    val outputFile = new File(dir, "output")
-  //    Resource.using(new PrintWriter(new FileWriter(inputFile))) {
-  //      _.println("Some data")
-  //    }
-  //    val inputArtifact = new FileArtifact(inputFile)
-  //    val outputArtifact = new FileArtifact(outputFile)
-  //
-  //    val copy = new ProducerWithPersistence(RunExternalProcess(ScriptToken("cp"), InputFileToken("input"), OutputFileToken("output"))(
-  //      inputs = Seq(inputArtifact)
-  //    )
-  //      .outputs("output"), StreamIo, outputArtifact)
-  //    copy.get
-  //    outputFile should exist
-  //    Source.fromFile(outputFile).mkString should equal("Some data\n")
-  //
-  //    copy.stepInfo.dependencies.size should equal(1)
-  //    Workflow.upstreamDependencies(copy).size should equal(2)
-  //  }
-  //
-  //  it should "pipe stdin to stdout" in {
-  //    val echo = new ExternalProcess("echo", "hello", "world")
-  //    val wc = new ExternalProcess("wc", "-c")
-  //    val result = wc.run(Seq(), stdinput = echo.run(Seq()).stdout)
-  //    IOUtils.readLines(result.stdout()).asScala.head.trim().toInt should equal(11)
-  //  }
-  //
-  //  def consumeExtargForCoerceTest(absdScript: String, a: Extarg) = {
-  //    RunExternalProcess(ScriptToken("cat"), InputFileToken(""))(
-  //      Seq(a),
-  //      versionHistory = Seq("v1.0")
-  //    )
-  //  }
   //
   //  it should "coerce a Producer[() -> InputStream] to Extarg" in {
   //    import org.allenai.pipeline.ExternalProcess._
