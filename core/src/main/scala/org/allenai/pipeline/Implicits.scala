@@ -1,5 +1,9 @@
 package org.allenai.pipeline
 
+import java.nio.file.Files
+
+import org.allenai.pipeline.InputFileArg.FileArtifactProducer
+import org.apache.commons.io.FileUtils
 import spray.json.JsonFormat
 
 import java.io.File
@@ -27,7 +31,18 @@ trait Implicits {
     }
 
   implicit def convertToProcessArg(s: String): StringArg = StringArg(s)
-
-
+  implicit def convertToInputFile(input: (FlatArtifact, String)) = {
+    val (artifact, name) = input
+    InputFileArg(name, artifact)
+  }
+  implicit def convertPersistedProducerToInputFile[T, A <: FlatArtifact](
+    input: (PersistedProducer[T, A], String)
+  ) = {
+    val (p, name) = input
+    InputFileArg(name, p.copy(create = () => {
+      p.get
+      new FileArtifactProducer(p.artifact).get
+    }))
+  }
 
 }

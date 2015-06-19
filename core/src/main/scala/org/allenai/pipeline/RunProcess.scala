@@ -16,8 +16,6 @@ import scala.io.Source
   *               Examples:
   *               StringArg("cp") InputFileArg("data.tsv") OutputFileArg("data-copy.tsv")
   *               StringArg("python") InputFileArg("run.py") StringArg("-o") OutputFileArg("output.txt")
-  *
-  *               Producers based on ExternalProcess should be created with class RunExternalProcess.
   */
 
 case class RunProcess(args: ProcessArg*) extends Producer[ProcessOutput] with Ai2SimpleStepInfo {
@@ -38,7 +36,9 @@ case class RunProcess(args: ProcessArg*) extends Producer[ProcessOutput] with Ai
     val captureStderrFile = new File(scratchDir, "stderr")
     val stdout = new FileWriter(captureStdoutFile)
     val stderr = new FileWriter(captureStderrFile)
-    val stdInput = args.collect { case arg: StdInput => arg.inputData.get.read }.headOption.getOrElse(new ByteArrayInputStream(Array.emptyByteArray))
+    val stdInput = args.collect {
+      case StdInput(inputData) => inputData.get.read
+    }.headOption.getOrElse(new ByteArrayInputStream(Array.emptyByteArray))
 
     val logger = ProcessLogger(
       (o: String) => stdout.append(o).append('\n'),
@@ -132,6 +132,30 @@ trait ProcessArg {
 }
 
 case class InputFileArg(name: String, inputFile: Producer[FileArtifact]) extends ProcessArg
+
+object InputFileArg {
+  def apply(name: String, artifact: FlatArtifact) = {
+    new InputFileArg(name, new FileArtifactProducer(artifact))
+  }
+  class FileArtifactProducer(artifact: FlatArtifact) extends Producer[FileArtifact] with Ai2SimpleStepInfo {
+    override def create = {
+      artifact match {
+        case f: FileArtifact => f
+        case a =>
+          val scratchDir = Files.createTempDirectory(null).toFile
+          sys.addShutdownHook(FileUtils.deleteDirectory(scratchDir))
+          val tmp = new FileArtifact(new File(scratchDir, "tmp"))
+          a.copyTo(tmp)
+          tmp
+      }
+    }
+
+    override def stepInfo =
+      super.stepInfo.copy(className = "InputFile")
+        .copy(outputLocation = Some(artifact.url))
+        .addParameters("file" -> artifact.url)
+  }
+}
 
 case class OutputFileArg(name: String) extends ProcessArg
 

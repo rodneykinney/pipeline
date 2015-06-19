@@ -1,13 +1,12 @@
 package org.allenai.pipeline
 
+import java.io.{ File, FileWriter, PrintWriter }
 import java.lang.Thread.UncaughtExceptionHandler
 
 import org.allenai.common.Resource
 import org.allenai.common.testkit.{ ScratchDirectory, UnitSpec }
 
 import scala.io.Source
-
-import java.io.{ PrintWriter, FileWriter, File }
 
 /** Created by rodneykinney on 5/14/15.
   */
@@ -70,7 +69,9 @@ class TestRunProcess extends UnitSpec with ScratchDirectory {
   }
 
   it should "capture stderr" in {
-    val noSuchParameter = new RunProcess("touch", "-x", "foo") { override def requireStatusCode = Set(1) }
+    val noSuchParameter = new RunProcess("touch", "-x", "foo") {
+      override def requireStatusCode = Set(1)
+    }
     val stderr = Source.fromInputStream(noSuchParameter.stderr.get.read).getLines.mkString("\n")
     stderr.size should be > 0
   }
@@ -119,6 +120,16 @@ class TestRunProcess extends UnitSpec with ScratchDirectory {
     val wc = RunProcess("wc", "-c", StdInput(echo.stdout))
     val result = wc.stdout.get
     Source.fromFile(result.file).mkString.trim.toInt should equal(12)
+  }
+
+  it should "accept implicit conversions" in {
+    val pipeline = Pipeline(new File(scratchDir, "TestImplicits"))
+    val echoOutput = pipeline.persist(RunProcess("echo", "hello", "world").stdout, CopyFlatArtifact, "Echo")
+    val wc = RunProcess("wc", "-c", echoOutput -> "inputFile")
+    pipeline.persist(wc.stdout, CopyFlatArtifact, "CharacterCount")
+    pipeline.run("TestImplicits")
+
+    val wc2 = RunProcess("wc", "-c", echoOutput.artifact -> "inputFile")
   }
 
   //    def consumeExtargForCoerceTest(absdScript: String, a: Extarg) = {
