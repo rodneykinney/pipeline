@@ -1,12 +1,12 @@
 package org.allenai.pipeline
 
-import java.io.{ File, FileWriter, PrintWriter }
-import java.lang.Thread.UncaughtExceptionHandler
-
 import org.allenai.common.Resource
-import org.allenai.common.testkit.{ ScratchDirectory, UnitSpec }
+import org.allenai.common.testkit.{ScratchDirectory, UnitSpec}
 
 import scala.io.Source
+
+import java.io.{File, FileWriter, PrintWriter}
+import java.lang.Thread.UncaughtExceptionHandler
 
 /** Created by rodneykinney on 5/14/15.
   */
@@ -104,16 +104,15 @@ class TestRunProcess extends UnitSpec with ScratchDirectory {
     Resource.using(new PrintWriter(new FileWriter(inputFile))) {
       _.println("Some data")
     }
-    val inputArtifact = new FileArtifact(inputFile)
     val outputArtifact = new FileArtifact(outputFile)
 
     val copy = new ProducerWithPersistence(
       RunProcess(
         "cp",
-        InputFileArg("input", Producer.fromMemory(inputArtifact)),
-        OutputFileArg("output")
+        inputFile -> "sourceFile",
+        OutputFileArg("targetFile")
       )
-        .outputFiles("output"), UploadFile, outputArtifact
+        .outputFiles("targetFile"), UploadFile, outputArtifact
     )
     copy.get
     outputFile should exist
@@ -132,12 +131,14 @@ class TestRunProcess extends UnitSpec with ScratchDirectory {
 
   it should "accept implicit conversions" in {
     val pipeline = newPipeline("TestImplicits")
-    val echoOutput = pipeline.persist(RunProcess("echo", "hello", "world").stdout, SaveStream, "Echo")
+    val echoOutput = pipeline.persist(RunProcess("echo", "hello", "world").stdout, SaveStream, "EchoCommandStdout")
     val wc = RunProcess("wc", "-c", echoOutput -> "inputFile")
-    pipeline.persist(wc.stdout, SaveStream, "CharacterCount")
+    val wc2 = RunProcess("wc", "-c", StdInput(echoOutput))
+    pipeline.persist(wc.stdout, SaveStream, "CharacterCountFile")
+    pipeline.persist(wc2.stdout, SaveStream, "CharacterCountStdin")
     pipeline.run("TestImplicits")
 
-    val wc2 = RunProcess("wc", "-c", echoOutput.artifact -> "inputFile")
+    RunProcess("wc", "-c", echoOutput.artifact -> "inputFile")
   }
 
   //    def consumeExtargForCoerceTest(absdScript: String, a: Extarg) = {

@@ -111,7 +111,7 @@ case class RunProcess(args: ProcessArg*) extends Producer[ProcessOutput] with Ai
 
   def cmd(scratchDir: File): Seq[String] = {
     args.collect {
-      case InputFileArg(_, p) => p.get.file.getCanonicalPath
+      case InputFileArg(_, p) => p.get.getCanonicalPath
       case OutputFileArg(name) => new File(scratchDir, name).getCanonicalPath
       case StringArg(arg) => arg
     }
@@ -137,33 +137,7 @@ trait ProcessArg {
   def name: String
 }
 
-case class InputFileArg(name: String, inputFile: Producer[FileArtifact]) extends ProcessArg
-
-object InputFileArg {
-  def apply(name: String, artifact: FlatArtifact) = {
-    new InputFileArg(name, new FileArtifactProducer(artifact))
-  }
-
-  class FileArtifactProducer(artifact: FlatArtifact) extends Producer[FileArtifact] with Ai2SimpleStepInfo {
-    override def create = {
-      artifact match {
-        case f: FileArtifact => f
-        case a =>
-          val scratchDir = Files.createTempDirectory(null).toFile
-          sys.addShutdownHook(FileUtils.deleteDirectory(scratchDir))
-          val tmp = new FileArtifact(new File(scratchDir, "tmp"))
-          a.copyTo(tmp)
-          tmp
-      }
-    }
-
-    override def stepInfo =
-      super.stepInfo.copy(className = "InputFile")
-        .copy(outputLocation = Some(artifact.url))
-        .addParameters("file" -> artifact.url)
-  }
-
-}
+case class InputFileArg(name: String, inputFile: Producer[File]) extends ProcessArg
 
 case class OutputFileArg(name: String) extends ProcessArg
 
