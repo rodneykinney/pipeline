@@ -1,11 +1,13 @@
 package org.allenai.pipeline
 
-import java.io._
-import java.nio.file.Files
+import org.allenai.common.Resource
 
 import org.apache.commons.io.FileUtils
 
 import scala.io.Source
+
+import java.io._
+import java.nio.file.Files
 
 /** Executes an arbitrary system process
   * @param args   The set of tokens that comprise the command to be executed.
@@ -20,7 +22,7 @@ import scala.io.Source
 
 case class RunProcess(args: ProcessArg*) extends Producer[ProcessOutput] with Ai2SimpleStepInfo {
   {
-    val outputFileNames = args.collect { case arg: OutputFileArg => arg }.map(_.name)
+    val outputFileNames = args.collect { case arg: OutputFileArg => arg}.map(_.name)
     require(outputFileNames.distinct.size == outputFileNames.size, {
       val duplicates = outputFileNames.groupBy(x => x).filter(_._2.size > 1).map(_._1)
       s"Duplicate output names: ${duplicates.mkString("[", ",", "]")}"
@@ -37,7 +39,7 @@ case class RunProcess(args: ProcessArg*) extends Producer[ProcessOutput] with Ai
     val stdout = new FileWriter(captureStdoutFile)
     val stderr = new FileWriter(captureStderrFile)
     val stdInput = args.collect {
-      case StdInput(inputData) => inputData.get.read
+      case StdInput(inputData) => inputData.get
     }.headOption.getOrElse(new ByteArrayInputStream(Array.emptyByteArray))
 
     val logger = ProcessLogger(
@@ -56,16 +58,22 @@ case class RunProcess(args: ProcessArg*) extends Producer[ProcessOutput] with Ai
       s"Command $command failed with status $status: ${Source.fromFile(captureStderrFile).getLines.take(100).mkString("\n")}"
     )
 
-    val outputFiles = args.collect {
-      case arg: OutputFileArg => (arg.name, new FileArtifact(new File(scratchDir, arg.name)))
+    val outFiles = args.collect {
+      case OutputFileArg(name) =>
+        val file = new File(scratchDir, name)
+        require(file.exists, s"Argument $name was declared as an output file, but was not created by process")
+        (name, file)
     }.toMap
 
-    ProcessOutput(
-      status,
-      new FileArtifact(captureStdoutFile),
-      new FileArtifact(captureStderrFile),
-      outputFiles
-    )
+    new ProcessOutput {
+      def exitStatus = status
+
+      def stdout = new FileInputStream(captureStdoutFile)
+
+      def stderr = new FileInputStream(captureStderrFile)
+
+      def outputFiles = outFiles
+    }
   }
 
   // Fail if the external process returns with a status code not included in this set
@@ -73,34 +81,32 @@ case class RunProcess(args: ProcessArg*) extends Producer[ProcessOutput] with Ai
 
   val outer = this
 
-  def stdout: Producer[FileArtifact] =
+  def stdout: Producer[InputStream] =
     this.copy(
       create = () => outer.get.stdout,
       stepInfo = () => PipelineStepInfo("stdout")
-      .addParameters("cmd" -> outer)
-      .copy(outputLocation = Some(outer.get.stdout.url))
-    )
+        .addParameters("cmd" -> outer)
+    ).withCachingDisabled // Can't cache an InputStreama
 
-  def stderr: Producer[FileArtifact] =
+  def stderr: Producer[InputStream] =
     this.copy(
       create = () => outer.get.stderr,
       stepInfo = () => PipelineStepInfo("stderr")
-      .addParameters("cmd" -> outer)
-      .copy(outputLocation = Some(outer.get.stderr.url))
-    )
+        .addParameters("cmd" -> outer)
+    ).withCachingDisabled // Can't cache an InputStream
 
-  def outputFiles: Map[String, Producer[FileArtifact]] =
+  def outputFiles: Map[String, Producer[File]] =
     args.collect {
       case OutputFileArg(name) =>
         (
           name,
           this.copy(
-            create = () => outer.get.outputs(name),
+            create = () => outer.get.outputFiles(name),
             stepInfo = () => PipelineStepInfo(name)
-            .addParameters("cmd" -> outer)
-            .copy(outputLocation = Some(outer.get.outputs(name).url))
+              .addParameters("cmd" -> outer)
+              .copy(outputLocation = Some(outer.get.outputFiles(name).toURI))
           )
-        )
+          )
     }.toMap
 
   def cmd(scratchDir: File): Seq[String] = {
@@ -137,6 +143,7 @@ object InputFileArg {
   def apply(name: String, artifact: FlatArtifact) = {
     new InputFileArg(name, new FileArtifactProducer(artifact))
   }
+
   class FileArtifactProducer(artifact: FlatArtifact) extends Producer[FileArtifact] with Ai2SimpleStepInfo {
     override def create = {
       artifact match {
@@ -155,27 +162,63 @@ object InputFileArg {
         .copy(outputLocation = Some(artifact.url))
         .addParameters("file" -> artifact.url)
   }
+
 }
 
 case class OutputFileArg(name: String) extends ProcessArg
 
-case class StdInput(inputData: Producer[FileArtifact]) extends ProcessArg {
+case class StdInput(inputData: Producer[InputStream]) extends ProcessArg {
   def name = "stdin"
 }
 
 case class StringArg(name: String) extends ProcessArg
 
-case class ProcessOutput(
-  returnCode: Int,
-  stdout: FileArtifact,
-  stderr: FileArtifact,
-  outputs: Map[String, FileArtifact]
-)
+trait ProcessOutput {
+  def exitStatus: Int
+
+  def stdout: InputStream
+
+  def stderr: InputStream
+
+  def outputFiles: Map[String, File]
+}
 
 object CopyFlatArtifact extends ArtifactIo[FlatArtifact, FlatArtifact] with Ai2SimpleStepInfo {
   override def write(data: FlatArtifact, artifact: FlatArtifact): Unit =
     data.copyTo(artifact)
 
   override def read(artifact: FlatArtifact): FlatArtifact = artifact
+}
+
+object UploadFile extends ArtifactIo[File, FlatArtifact] with Ai2SimpleStepInfo {
+  override def write(data: File, artifact: FlatArtifact): Unit =
+  new FileArtifact(data).copyTo(artifact)
+
+  override def read(artifact: FlatArtifact): File = {
+    artifact match {
+      case f: FileArtifact => f.file
+      case a =>
+        val scratchDir = Files.createTempDirectory(null).toFile
+        sys.addShutdownHook(FileUtils.deleteDirectory(scratchDir))
+        val tmp = new File(scratchDir, "tmp")
+        a.copyTo(new FileArtifact(tmp))
+        tmp
+    }
+  }
+}
+
+object SaveStream extends ArtifactIo[InputStream, FlatArtifact] with Ai2SimpleStepInfo {
+  override def write(data: InputStream, artifact: FlatArtifact): Unit = {
+    artifact.write { writer =>
+      val BUFFER_SIZE = 16384
+      val buffer = new Array[Byte](BUFFER_SIZE)
+      Resource.using(data) { is =>
+        Iterator.continually(is.read(buffer)).takeWhile(_ != -1).foreach(n =>
+          writer.write(buffer, 0, n))
+      }
+    }
+  }
+
+  override def read(artifact: FlatArtifact): InputStream = artifact.read
 }
 

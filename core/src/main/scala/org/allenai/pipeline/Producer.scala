@@ -162,7 +162,12 @@ class ProducerWithPersistence[T, A <: Artifact](
         executionMode = ExecuteAndBufferStream
         logger.debug(s"$className reading type Iterator from $artifact using $io")
         io.read(artifact)
-      } else {
+      } else if (!cachingEnabled) {
+        executionMode = ExecuteAndBufferStream
+        logger.debug(s"$className reading non-cacheable data from $artifact using $io")
+        io.read(artifact)
+      }
+      else {
         result
       }
     } else {
@@ -173,6 +178,8 @@ class ProducerWithPersistence[T, A <: Artifact](
   }
 
   override def stepInfo = original.stepInfo.copy(outputLocation = Some(artifact.url))
+
+  override def cachingEnabled = original.cachingEnabled
 
   override def withCachingDisabled = {
     if (cachingEnabled) {

@@ -18,7 +18,7 @@ class TestRunProcess extends UnitSpec with ScratchDirectory {
     val outputFile = new File(scratchDir, "testTouchFile/output")
     val outputArtifact = new FileArtifact(outputFile)
     val p = RunProcess("touch", OutputFileArg("outputFile"))
-    val pp = new ProducerWithPersistence(p.outputFiles("outputFile"), CopyFlatArtifact, outputArtifact)
+    val pp = new ProducerWithPersistence(p.outputFiles("outputFile"), UploadFile, outputArtifact)
     pp.get
     outputFile should exist
   }
@@ -57,24 +57,32 @@ class TestRunProcess extends UnitSpec with ScratchDirectory {
   //
   it should "capture stdout" in {
     val echo = RunProcess("echo", "hello", "world")
-    val stdout = Source.fromInputStream(echo.stdout.get.read).getLines.mkString("\n")
+    val stdout = Source.fromInputStream(echo.stdout.get).getLines.mkString("\n")
     stdout should equal("hello world")
   }
 
   it should "capture stdout newlines" in {
     val s = "An old silent pond...\\nA frog jumps into the pond,\\nsplash! Silence again.\\n"
     val echo = RunProcess("printf", s)
-    val stdoutLines = Source.fromInputStream(echo.stdout.get.read).getLines.toList
+    val stdoutLines = Source.fromInputStream(echo.stdout.get).getLines.toList
     stdoutLines.size should equal(3)
+
+    val persistedStdout = newPipeline("testStdout").persist(echo.stdout, SaveStream)
+    Source.fromInputStream(persistedStdout.get).getLines.toList.size should equal(3)
+
   }
 
   it should "capture stderr" in {
     val noSuchParameter = new RunProcess("touch", "-x", "foo") {
       override def requireStatusCode = Set(1)
     }
-    val stderr = Source.fromInputStream(noSuchParameter.stderr.get.read).getLines.mkString("\n")
+    val stderr = Source.fromInputStream(noSuchParameter.stderr.get).mkString
     stderr.size should be > 0
+
+    val persistedStderr = newPipeline("testStderr").persist(noSuchParameter.stderr, SaveStream)
+    Source.fromInputStream(persistedStderr.get).mkString.size should be > 0
   }
+
   it should "throw an exception if command is not found" in {
     val noSuchCommand = RunProcess("eccho", "hello", "world")
     val defaultHandler = Thread.getDefaultUncaughtExceptionHandler
@@ -105,7 +113,7 @@ class TestRunProcess extends UnitSpec with ScratchDirectory {
         InputFileArg("input", Producer.fromMemory(inputArtifact)),
         OutputFileArg("output")
       )
-        .outputFiles("output"), CopyFlatArtifact, outputArtifact
+        .outputFiles("output"), UploadFile, outputArtifact
     )
     copy.get
     outputFile should exist
@@ -119,14 +127,14 @@ class TestRunProcess extends UnitSpec with ScratchDirectory {
     val echo = RunProcess("echo", "hello", "world")
     val wc = RunProcess("wc", "-c", StdInput(echo.stdout))
     val result = wc.stdout.get
-    Source.fromFile(result.file).mkString.trim.toInt should equal(12)
+    Source.fromInputStream(result).mkString.trim.toInt should equal(12)
   }
 
   it should "accept implicit conversions" in {
-    val pipeline = Pipeline(new File(scratchDir, "TestImplicits"))
-    val echoOutput = pipeline.persist(RunProcess("echo", "hello", "world").stdout, CopyFlatArtifact, "Echo")
+    val pipeline = newPipeline("TestImplicits")
+    val echoOutput = pipeline.persist(RunProcess("echo", "hello", "world").stdout, SaveStream, "Echo")
     val wc = RunProcess("wc", "-c", echoOutput -> "inputFile")
-    pipeline.persist(wc.stdout, CopyFlatArtifact, "CharacterCount")
+    pipeline.persist(wc.stdout, SaveStream, "CharacterCount")
     pipeline.run("TestImplicits")
 
     val wc2 = RunProcess("wc", "-c", echoOutput.artifact -> "inputFile")
@@ -167,4 +175,6 @@ class TestRunProcess extends UnitSpec with ScratchDirectory {
   //
   //    val cat1 = consumeExtargForCoerceTest("", inputArtifact) // should find convertArtifactToInputData
   //  }
+
+  def newPipeline(name: String) = Pipeline(new File(scratchDir, name))
 }
