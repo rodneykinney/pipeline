@@ -8,6 +8,7 @@ import org.allenai.common.Resource
 import org.allenai.pipeline.ExternalProcess._
 import org.allenai.pipeline.IoHelpers._
 import org.apache.commons.io.{ FileUtils, IOUtils }
+import org.slf4j.{Logger, LoggerFactory}
 
 import scala.annotation.tailrec
 import scala.collection.JavaConverters._
@@ -43,8 +44,14 @@ class ExternalProcess(val commandTokens: CommandToken*) {
       val err = new PrintWriter(captureStderrFile)
 
       val logger = ProcessLogger(
-        (o: String) => out.println(o),
-        (e: String) => err.println(e)
+        (o: String) => {
+          loggerOut.info(o)
+          out.println(o)
+        },
+        (e: String) => {
+          loggerErr.info(e)
+          err.println(e)
+        }
       )
 
       prepareInputPaths(ab, scratchDir)
@@ -68,6 +75,11 @@ class ExternalProcess(val commandTokens: CommandToken*) {
 }
 
 object ExternalProcess {
+  object Stdout {}
+  object Stderr {}
+
+  val loggerOut = LoggerFactory.getLogger(Stdout.getClass());
+  val loggerErr = LoggerFactory.getLogger(Stderr.getClass());
 
   trait Namable {
     def name: String
