@@ -20,7 +20,10 @@ import java.nio.file.Files
   *               StringArg("python") InputFileArg("run.py") StringArg("-o") OutputFileArg("output.txt")
   */
 
-case class RunProcess(args: ProcessArg*) extends Producer[ProcessOutput] with Ai2SimpleStepInfo {
+class RunProcess(args: Seq[ProcessArg],
+  stdinput: Producer[InputStream] = null,
+  versionId: String = "")
+  extends Producer[ProcessOutput] with Ai2SimpleStepInfo {
   {
     val outputFileNames = args.collect { case arg: OutputFileArg => arg}.map(_.name)
     require(outputFileNames.distinct.size == outputFileNames.size, {
@@ -38,9 +41,7 @@ case class RunProcess(args: ProcessArg*) extends Producer[ProcessOutput] with Ai
     val captureStderrFile = new File(scratchDir, "stderr")
     val stdout = new FileWriter(captureStdoutFile)
     val stderr = new FileWriter(captureStderrFile)
-    val stdInput = args.collect {
-      case StdInput(inputData) => inputData.get
-    }.headOption.getOrElse(new ByteArrayInputStream(Array.emptyByteArray))
+    val inputStream = Option(stdinput).map(_.get).getOrElse(new ByteArrayInputStream(Array.emptyByteArray))
 
     val logger = ProcessLogger(
       (o: String) => stdout.append(o).append('\n'),
@@ -49,7 +50,7 @@ case class RunProcess(args: ProcessArg*) extends Producer[ProcessOutput] with Ai
 
     val command = cmd(scratchDir)
 
-    val status = (command #< stdInput) ! logger
+    val status = (command #< inputStream) ! logger
     stdout.close()
     stderr.close()
 
@@ -75,6 +76,17 @@ case class RunProcess(args: ProcessArg*) extends Producer[ProcessOutput] with Ai
       def outputFiles = outFiles
     }
   }
+
+  // Specify an input stream that will be fed as stdin to the process
+  def withStdin(stdinput: Producer[InputStream]) =
+    new RunProcess(args, stdinput, versionId)
+
+  // Specify a versionId for the behavior of the external process
+  // For example, if the process calls a script in the user's PATH, then
+  // RunProcess should be instantiated with a different versionId when
+  // the logic of the underlying script changes
+  def withVersionId(id: String) =
+    new RunProcess(args, stdinput, id)
 
   // Fail if the external process returns with a status code not included in this set
   def requireStatusCode = Set(0)
@@ -119,18 +131,23 @@ case class RunProcess(args: ProcessArg*) extends Producer[ProcessOutput] with Ai
 
   override def stepInfo = {
     val inputFiles = for (InputFileArg(name, p) <- args) yield (name, p)
-    val stdInput = for (StdInput(p) <- args) yield ("stdin", p)
+    val stdInput = Option(stdinput).map(p => ("stdin", p)).toList
     val cmd = args.collect {
       case InputFileArg(name, _) => s"<$name>"
       case OutputFileArg(name) => s"<$name>"
       case StringArg(name) => name
     }
     super.stepInfo
+      .copy(classVersion = versionId)
       .addParameters("cmd" -> cmd.mkString(" "))
       .addParameters(inputFiles: _*)
       .addParameters(stdInput: _*)
   }
 
+}
+
+object RunProcess {
+  def apply(args: ProcessArg*) = new RunProcess(args)
 }
 
 trait ProcessArg {
@@ -140,10 +157,6 @@ trait ProcessArg {
 case class InputFileArg(name: String, inputFile: Producer[File]) extends ProcessArg
 
 case class OutputFileArg(name: String) extends ProcessArg
-
-case class StdInput(inputData: Producer[InputStream]) extends ProcessArg {
-  def name = "stdin"
-}
 
 case class StringArg(name: String) extends ProcessArg
 
@@ -166,7 +179,7 @@ object CopyFlatArtifact extends ArtifactIo[FlatArtifact, FlatArtifact] with Ai2S
 
 object UploadFile extends ArtifactIo[File, FlatArtifact] with Ai2SimpleStepInfo {
   override def write(data: File, artifact: FlatArtifact): Unit =
-  new FileArtifact(data).copyTo(artifact)
+    new FileArtifact(data).copyTo(artifact)
 
   override def read(artifact: FlatArtifact): File = {
     artifact match {

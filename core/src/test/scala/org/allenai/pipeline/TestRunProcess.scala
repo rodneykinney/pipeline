@@ -8,8 +8,6 @@ import scala.io.Source
 import java.io.{File, FileWriter, PrintWriter}
 import java.lang.Thread.UncaughtExceptionHandler
 
-/** Created by rodneykinney on 5/14/15.
-  */
 class TestRunProcess extends UnitSpec with ScratchDirectory {
 
   import org.allenai.pipeline.IoHelpers._
@@ -23,38 +21,15 @@ class TestRunProcess extends UnitSpec with ScratchDirectory {
     outputFile should exist
   }
 
-  //
-  //  def CatFileForTest(scratchDir: File, rfile: String, vh1: Seq[String]): Producer[() => InputStream] = {
-  //    val fa = new FileArtifact(new File(scratchDir, rfile))
-  //    RunExternalProcess(ScriptToken("cat"), InputFileToken("target"))(
-  //      Seq(fa),
-  //      versionHistory = vh1
-  //    ).stdout
-  //  }
-  //  "ScriptToken" should "be invariant of home directory" in {
-  //    val proc1 = ExtprocForScriptTokenTest(scratchDir, "/home/bert/src/pipelineFoo/supersort.pl")
-  //    val proc2 = ExtprocForScriptTokenTest(scratchDir, "/home/ernie/src/pipelineFoo/supersort.pl")
-  //    proc1.stepInfo.signature.id should equal(proc2.stepInfo.signature.id)
-  //  }
-  //
-  //  def ExtprocForScriptTokenTest(scratchDir: File, afile: String) = {
-  //    val f = new File(scratchDir, afile)
-  //    RunExternalProcess(ScriptToken(f.getAbsolutePath()))(Seq()).stdout
-  //  }
-  //
-  //  "RunExternalProcess signature" should "be invariant between identical producers" in {
-  //    val rfile = "in1.txt"
-  //    Resource.using(new java.io.PrintWriter(new java.io.FileWriter(new File(scratchDir, rfile)))) {
-  //      _.println("hello")
-  //    }
-  //    val pipeline = Pipeline(new File(scratchDir, "ExtargSignature"))
-  //    val cat1 = CatFileForTest(scratchDir, rfile, List("v1.0"))
-  //    val cat2 = CatFileForTest(scratchDir, rfile, List("v1.0"))
-  //    val sig1 = cat1.stepInfo.signature.infoString
-  //    val sig2 = cat2.stepInfo.signature.infoString
-  //    sig1 should equal(sig2)
-  //  }
-  //
+    it should "have a signature dependent on the version ID" in {
+      val cat1 = RunProcess("touch", OutputFileArg("empty.txt"))
+      val cat2 = RunProcess("touch", OutputFileArg("empty.txt")).withVersionId("2.0")
+      val cat2prime = RunProcess("touch", OutputFileArg("empty.txt")).withVersionId("2.0")
+
+      cat1.stepInfo.signature.id should not equal(cat2.stepInfo.signature.id)
+      cat2.stepInfo.signature.id should equal(cat2prime.stepInfo.signature.id)
+    }
+
   it should "capture stdout" in {
     val echo = RunProcess("echo", "hello", "world")
     val stdout = Source.fromInputStream(echo.stdout.get).getLines.mkString("\n")
@@ -73,7 +48,7 @@ class TestRunProcess extends UnitSpec with ScratchDirectory {
   }
 
   it should "capture stderr" in {
-    val noSuchParameter = new RunProcess("touch", "-x", "foo") {
+    val noSuchParameter = new RunProcess(List("touch", "-x", "foo")) {
       override def requireStatusCode = Set(1)
     }
     val stderr = Source.fromInputStream(noSuchParameter.stderr.get).mkString
@@ -124,7 +99,7 @@ class TestRunProcess extends UnitSpec with ScratchDirectory {
 
   it should "pipe stdin to stdout" in {
     val echo = RunProcess("echo", "hello", "world")
-    val wc = RunProcess("wc", "-c", StdInput(echo.stdout))
+    val wc = RunProcess("wc", "-c").withStdin(echo.stdout)
     val result = wc.stdout.get
     Source.fromInputStream(result).mkString.trim.toInt should equal(12)
   }
@@ -133,49 +108,13 @@ class TestRunProcess extends UnitSpec with ScratchDirectory {
     val pipeline = newPipeline("TestImplicits")
     val echoOutput = pipeline.persist(RunProcess("echo", "hello", "world").stdout, SaveStream, "EchoCommandStdout")
     val wc = RunProcess("wc", "-c", echoOutput -> "inputFile")
-    val wc2 = RunProcess("wc", "-c", StdInput(echoOutput))
+    val wc2 = RunProcess("wc", "-c").withStdin(echoOutput)
     pipeline.persist(wc.stdout, SaveStream, "CharacterCountFile")
     pipeline.persist(wc2.stdout, SaveStream, "CharacterCountStdin")
     pipeline.run("TestImplicits")
 
     RunProcess("wc", "-c", echoOutput.artifact -> "inputFile")
   }
-
-  //    def consumeExtargForCoerceTest(absdScript: String, a: Extarg) = {
-  //      RunExternalProcess(ScriptToken("cat"), InputFileToken(""))(
-  //        Seq(a),
-  //        versionHistory = Seq("v1.0")
-  //      )
-  //    }
-  //
-  //  it should "coerce a Producer[() -> InputStream] to Extarg" in {
-  //    import org.allenai.pipeline.ExternalProcess._
-  //    val echo = RunExternalProcess("echo", "hello", "world")(Seq())
-  //    val cat1 = consumeExtargForCoerceTest("", echo.stdout) // should find convertProducerToInputData
-  //  }
-  //
-  //  it should "coerce a PersistedProducer[() -> InputStream,_] to Extarg" in {
-  //    import org.allenai.pipeline.ExternalProcess._
-  //    val pipeline = Pipeline(scratchDir)
-  //    val echo = RunExternalProcess("echo", "hello", "world")(Seq())
-  //    val echop = pipeline.persist(echo.stdout, StreamIo, "hint_out")
-  //    val cat1 = consumeExtargForCoerceTest("", echop) // finds convertPersistedProducer1ToInputData
-  //    // TODO: why isn't convertPersistedProducer2ToInputData enough?
-  //  }
-  //
-  //  it should "coerce an artifact to Extarg" in {
-  //    import org.allenai.pipeline.ExternalProcess._
-  //
-  //    val dir = new File(scratchDir, "testCoerce")
-  //    dir.mkdirs()
-  //    val inputFile = new File(dir, "a1")
-  //    Resource.using(new PrintWriter(new FileWriter(inputFile))) {
-  //      _.println("Some data")
-  //    }
-  //    val inputArtifact = new FileArtifact(inputFile)
-  //
-  //    val cat1 = consumeExtargForCoerceTest("", inputArtifact) // should find convertArtifactToInputData
-  //  }
 
   def newPipeline(name: String) = Pipeline(new File(scratchDir, name))
 }
