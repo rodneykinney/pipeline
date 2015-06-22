@@ -14,21 +14,20 @@ class TestRunProcess extends UnitSpec with ScratchDirectory {
 
   "RunProcess" should "create output files" in {
     val outputFile = new File(scratchDir, "testTouchFile/output")
-    val outputArtifact = new FileArtifact(outputFile)
-    val p = RunProcess("touch", OutputFileArg("outputFile"))
-    val pp = new ProducerWithPersistence(p.outputFiles("outputFile"), UploadFile, outputArtifact)
+    val p = RunProcess("touch", OutputFileArg("empty.txt"))
+    val pp = new ProducerWithPersistence(p.outputFiles("empty.txt"), UploadFile, new FileArtifact(outputFile))
     pp.get
     outputFile should exist
   }
 
-    it should "have a signature dependent on the version ID" in {
-      val cat1 = RunProcess("touch", OutputFileArg("empty.txt"))
-      val cat2 = RunProcess("touch", OutputFileArg("empty.txt")).withVersionId("2.0")
-      val cat2prime = RunProcess("touch", OutputFileArg("empty.txt")).withVersionId("2.0")
+  it should "have a signature dependent on the version ID" in {
+    val cat1 = RunProcess("touch", OutputFileArg("empty.txt"))
+    val cat2 = RunProcess("touch", OutputFileArg("empty.txt")).withVersionId("2.0")
+    val cat2prime = RunProcess("touch", OutputFileArg("empty.txt")).withVersionId("2.0")
 
-      cat1.stepInfo.signature.id should not equal(cat2.stepInfo.signature.id)
-      cat2.stepInfo.signature.id should equal(cat2prime.stepInfo.signature.id)
-    }
+    cat1.stepInfo.signature.id should not equal (cat2.stepInfo.signature.id)
+    cat2.stepInfo.signature.id should equal(cat2prime.stepInfo.signature.id)
+  }
 
   it should "capture stdout" in {
     val echo = RunProcess("echo", "hello", "world")
