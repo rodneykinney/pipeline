@@ -36,8 +36,10 @@ class ExternalProcess(val commandTokens: CommandToken*) {
       sys.addShutdownHook(FileUtils.deleteDirectory(scratchDir))
 
       val ab = argsBound(inputs, commandTokens).toList
+      val cmd1: List[String] = cmd(ab, scratchDir)
 
       import scala.sys.process._
+      prepareInputPaths(ab, scratchDir)
       val captureStdoutFile = new File(scratchDir, "stdout")
       val captureStderrFile = new File(scratchDir, "stderr")
       val out = new PrintWriter(captureStdoutFile)
@@ -53,9 +55,6 @@ class ExternalProcess(val commandTokens: CommandToken*) {
           err.println(e)
         }
       )
-
-      prepareInputPaths(ab, scratchDir)
-      val cmd1: List[String] = cmd(ab, scratchDir)
 
       val status = (cmd1 #< stdinput()) ! logger
       out.close()
