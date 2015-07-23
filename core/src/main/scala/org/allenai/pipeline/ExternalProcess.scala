@@ -89,7 +89,7 @@ class ExternalProcess(val commandTokens: CommandToken*) {
                 Resource.using(new BufferedReader(new InputStreamReader(isOut2))){ readerOut =>
                   var ln = readerOut.readLine()
                   while (ln != null) {
-                    loggerOut.info(ln)
+                    loggerOut.debug(ln)
                     ln = readerOut.readLine()
                   }
                 }
@@ -102,7 +102,7 @@ class ExternalProcess(val commandTokens: CommandToken*) {
                 Resource.using(new BufferedReader(new InputStreamReader(isErr2))) { readerErr =>
                   var ln = readerErr.readLine()
                   while(ln != null) {
-                    loggerErr.info(ln)
+                    loggerErr.debug(ln)
                     ln = readerErr.readLine()
                   }
                 }
@@ -112,11 +112,11 @@ class ExternalProcess(val commandTokens: CommandToken*) {
         )
 
         val stCmd1 = cmd1.mkString(" ")
-        logger.info(s"about to run $stCmd1")
+        loggerCommands.debug(s"about to run $stCmd1")
         val p = Process(cmd1).run(prIo)
 
         val status = p.exitValue()
-        logger.info(s"process exited with status $status: $stCmd1")
+        loggerCommands.debug(s"process exited with status $status: $stCmd1")
         while(threadA.isEmpty || threadB.isEmpty || threadC.isEmpty)
           Thread.sleep(50)
         threadB.get.join()
@@ -129,13 +129,23 @@ class ExternalProcess(val commandTokens: CommandToken*) {
   }
 }
 
-object ExternalProcess {
-  object Stdout {}
-  object Stderr {}
+/** An example of how to selectively enable logging is in:
+  * core/src/test/resources/logback.xml:
+  *         <logger name="org.allenai.pipeline.ExternalProcessLog.Commands" level="DEBUG"/>
+  *
+  * This configuration reports the commands and their statuses, but not their out/err consoles.
+  */
+package ExternalProcessLog {
+    class Commands {}
+    class Stdout {}
+    class Stderr {}
+}
 
-  val logger = LoggerFactory.getLogger(ExternalProcess.getClass())
-  val loggerOut = LoggerFactory.getLogger(ExternalProcess.Stdout.getClass());
-  val loggerErr = LoggerFactory.getLogger(ExternalProcess.Stderr.getClass());
+object ExternalProcess {
+
+  val loggerCommands = LoggerFactory.getLogger(classOf[ExternalProcessLog.Commands])
+  val loggerOut = LoggerFactory.getLogger(classOf[ExternalProcessLog.Stdout]);
+  val loggerErr = LoggerFactory.getLogger(classOf[ExternalProcessLog.Stderr]);
 
   trait Namable {
     def name: String
