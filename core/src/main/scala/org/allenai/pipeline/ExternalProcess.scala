@@ -38,27 +38,9 @@ class ExternalProcess(val commandTokens: CommandToken*) {
       val ab = argsBound(inputs, commandTokens).toList
       val cmd1: List[String] = cmd(ab, scratchDir)
 
-      import scala.sys.process._
       prepareInputPaths(ab, scratchDir)
-      val captureStdoutFile = new File(scratchDir, "stdout")
-      val captureStderrFile = new File(scratchDir, "stderr")
-      val out = new PrintWriter(captureStdoutFile)
-      val err = new PrintWriter(captureStderrFile)
-
-      val logger = ProcessLogger(
-        (o: String) => {
-          loggerOut.info(o)
-          out.println(o)
-        },
-        (e: String) => {
-          loggerErr.info(e)
-          err.println(e)
-        }
-      )
-
-      val status = (cmd1 #< stdinput()) ! logger
-      out.close()
-      err.close()
+      val (captureStdoutFile: File, captureStderrFile: File, status: Int) =
+        runI(stdinput, scratchDir, cmd1)
 
       val outputNames = commandTokens.collect { case OutputFileToken(name) => name }
 
@@ -71,6 +53,30 @@ class ExternalProcess(val commandTokens: CommandToken*) {
       CommandOutput(status, stdout, stderr, outputStreams.toMap)
     }
 
+  private def runI(stdinput: () => InputStream, scratchDir: File, cmd1: List[String]) =
+  {
+    import scala.sys.process._
+    val captureStdoutFile = new File(scratchDir, "stdout")
+    val captureStderrFile = new File(scratchDir, "stderr")
+    val out = new PrintWriter(captureStdoutFile)
+    val err = new PrintWriter(captureStderrFile)
+
+    val logger = ProcessLogger(
+      (o: String) => {
+        loggerOut.info(o)
+        out.println(o)
+      },
+      (e: String) => {
+        loggerErr.info(e)
+        err.println(e)
+      }
+    )
+
+    val status = (cmd1 #< stdinput()) ! logger
+    out.close()
+    err.close()
+    (captureStdoutFile, captureStderrFile, status)
+  }
 }
 
 object ExternalProcess {
