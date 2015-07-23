@@ -127,23 +127,26 @@ class TestExternalProcess extends UnitSpec with ScratchDirectory {
 
   it should "capture weird characters in stdout" in {
     val weirds =
-      List( ("", 0),
-            ("""\n""", 1),
-            ("""a\0""", 2),
-            ("""a\13""", 2),
-            ("""a\10""", 2),
-            ("""a """, 2),
-            ("""a\13\10""", 3),
-            ("""\0""", 1))
+      List(
+        ("", 0),
+        ("""\n""", 1),
+        ("""a\0""", 2),
+        ("""a\13""", 2),
+        ("""a\10""", 2),
+        ("""a """, 2),
+        ("""a\13\10""", 3),
+        ("""\0""", 1)
+      )
     val surprises =
-        weirds.flatMap{case (stWeird:String, cBytesExpected:Int) =>
+      weirds.flatMap {
+        case (stWeird: String, cBytesExpected: Int) =>
           val echo = new ExternalProcess("printf", stWeird)
           val cBytes = scala.io.Source.fromInputStream(echo.run(Seq()).stdout()).length
-          if(cBytes == cBytesExpected)
+          if (cBytes == cBytesExpected)
             List()
           else
             List(s"Length of '$stWeird' is $cBytes but expected $cBytesExpected")
-        }
+      }
     surprises should equal(List())
   }
 
