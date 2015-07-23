@@ -26,7 +26,7 @@ import scala.collection.JavaConverters._
   *                        Producers based on ExternalProcess should be created with class RunExternalProcess.
   */
 class ExternalProcess(val commandTokens: CommandToken*) {
-
+  private val BUFFER_SIZE = 16384
   def run(
     inputs: Seq[Extarg],
     stdinput: () => InputStream = () => new ByteArrayInputStream(Array.emptyByteArray)
@@ -53,29 +53,79 @@ class ExternalProcess(val commandTokens: CommandToken*) {
       CommandOutput(status, stdout, stderr, outputStreams.toMap)
     }
 
+  /**
+   * From https://github.com/scala/scala/blob/v2.11.5/src/library/scala/sys/process/ProcessIO.scala:
+   *
+   *   `ProcessBuilder` will call `writeInput`, `processOutput` and `processError`
+   *   in separate threads, and if daemonizeThreads is true, they will all be
+   *   marked as daemon threads.
+   */
   private def runI(stdinput: () => InputStream, scratchDir: File, cmd1: List[String]) =
   {
     import scala.sys.process._
+
     val captureStdoutFile = new File(scratchDir, "stdout")
     val captureStderrFile = new File(scratchDir, "stderr")
-    val out = new PrintWriter(captureStdoutFile)
-    val err = new PrintWriter(captureStderrFile)
+    Resource.using(new FileOutputStream(captureStdoutFile)){ out =>
+      Resource.using(new FileOutputStream(captureStderrFile)){ err =>
+        val threadA1 = Thread.currentThread()
+        var threadA :Option[Thread] = None
+        var threadB :Option[Thread] = None
+        var threadC :Option[Thread] = None
+        val prIo : ProcessIO = new ProcessIO(
+          (stdin:OutputStream) => {
+            threadA = Some(Thread.currentThread())
+            Resource.using(stdin){ stdin =>
+              val buffer = new Array[Byte](BUFFER_SIZE)
+              Resource.using(stdinput()) { is =>
+                Iterator.continually(is.read(buffer)).takeWhile(_ != -1).foreach(n =>
+                  stdin.write(buffer, 0, n))
+              }
+            }},
+          (isOut:InputStream) => {
+            Resource.using(isOut) { isOut =>
+              threadB = Some(Thread.currentThread())
+              Resource.using(new org.apache.commons.io.input.TeeInputStream(isOut, out)){ isOut2 =>
+                Resource.using(new BufferedReader(new InputStreamReader(isOut2))){ readerOut =>
+                  var ln = readerOut.readLine()
+                  while (ln != null) {
+                    loggerOut.info(ln)
+                    ln = readerOut.readLine()
+                  }
+                }
+              }
+            }},
+          (isErr:InputStream) => {
+            Resource.using(isErr) { isErr =>
+              threadC = Some(Thread.currentThread())
+              Resource.using(new org.apache.commons.io.input.TeeInputStream(isErr, err)) { isErr2 =>
+                Resource.using(new BufferedReader(new InputStreamReader(isErr2))) { readerErr =>
+                  var ln = readerErr.readLine()
+                  while(ln != null) {
+                    loggerErr.info(ln)
+                    ln = readerErr.readLine()
+                  }
+                }
+              }
+            }
+          }
+        )
 
-    val logger = ProcessLogger(
-      (o: String) => {
-        loggerOut.info(o)
-        out.println(o)
-      },
-      (e: String) => {
-        loggerErr.info(e)
-        err.println(e)
+        val stCmd1 = cmd1.mkString(" ")
+        logger.info(s"about to run $stCmd1")
+        val p = Process(cmd1).run(prIo)
+
+        val status = p.exitValue()
+        logger.info(s"process exited with status $status: $stCmd1")
+        while(threadA.isEmpty || threadB.isEmpty || threadC.isEmpty)
+          Thread.sleep(50)
+        threadB.get.join()
+        threadC.get.join()
+        threadA.get.interrupt()
+        threadA.get.join()
+        (captureStdoutFile, captureStderrFile, status)
       }
-    )
-
-    val status = (cmd1 #< stdinput()) ! logger
-    out.close()
-    err.close()
-    (captureStdoutFile, captureStderrFile, status)
+    }
   }
 }
 
@@ -83,8 +133,9 @@ object ExternalProcess {
   object Stdout {}
   object Stderr {}
 
-  val loggerOut = LoggerFactory.getLogger(Stdout.getClass());
-  val loggerErr = LoggerFactory.getLogger(Stderr.getClass());
+  val logger = LoggerFactory.getLogger(ExternalProcess.getClass())
+  val loggerOut = LoggerFactory.getLogger(ExternalProcess.Stdout.getClass());
+  val loggerErr = LoggerFactory.getLogger(ExternalProcess.Stderr.getClass());
 
   trait Namable {
     def name: String
