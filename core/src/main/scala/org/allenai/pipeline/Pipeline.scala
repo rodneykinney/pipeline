@@ -231,11 +231,11 @@ trait Pipeline extends Logging {
     val today = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss").format(new Date())
 
     val workflowArtifact = createOutputArtifact[FlatArtifact](s"summary/$title-$today.workflow.json")
-    val workflow = Workflow.forPipeline(targets.toMap)
+    val workflow = Workflow.forPipeline(targets.toMap, rootOutputUrl)
     SingletonIo.json[Workflow].write(workflow, workflowArtifact)
 
     val htmlArtifact = createOutputArtifact[FlatArtifact](s"summary/$title-$today.html")
-    SingletonIo.text[String].write(workflow.renderHtml, htmlArtifact)
+    SingletonIo.text[String].write(workflow.renderHtml(new URI("../")), htmlArtifact)
 
     val signatureArtifact = createOutputArtifact[FlatArtifact](s"summary/$title-$today.signatures.json")
     val signatureFormat = Signature.jsonWriter
@@ -273,11 +273,11 @@ trait Pipeline extends Logging {
       rawTitle.replaceAll("""\s+""", "-")
     }-dryRun"
     val workflowArtifact = new FileArtifact(new File(outputDir, s"$title.workflow.json"))
-    val workflow = Workflow.forPipeline(targets)
+    val workflow = Workflow.forPipeline(targets, outputDir.toURI())
     SingletonIo.json[Workflow].write(workflow, workflowArtifact)
 
     val htmlArtifact = new FileArtifact(new File(outputDir, s"$title.html"))
-    SingletonIo.text[String].write(workflow.renderHtml, htmlArtifact)
+    SingletonIo.text[String].write(workflow.renderHtml(new URI("./")), htmlArtifact)
 
     val signatureArtifact = new FileArtifact(new File(outputDir, s"$title.signatures.json"))
     val signatureFormat = Signature.jsonWriter
