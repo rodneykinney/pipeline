@@ -25,7 +25,7 @@ case class Workflow(nodes: Map[String, Node], links: Iterable[Link]) {
     case (nodeId, node) => node.outputMissing
   }
 
-  def renderHtml(rdirPipelineOutput:URI) : String = {
+  def renderHtml(rdirPipelineOutput: URI): String = {
     import Workflow._
     //    val w = this
     val sources = sourceNodes()
@@ -50,7 +50,7 @@ case class Workflow(nodes: Map[String, Node], links: Iterable[Link]) {
           // An optional link to the source data.
           info.srcUrl.map(uri => s"""new Link(${link(uri).toJson},${(if (info.classVersion.nonEmpty) info.classVersion else "src").toJson})""") ++ // scalastyle:ignore
             // An optional link to the output data.
-            info.relOutputLocation.map((uri : URI) =>
+            info.relOutputLocation.map((uri: URI) =>
               s"""new Link(${link(rdirPipelineOutput.resolve(uri)).toJson},"output")""")
         val linksJson = links.mkString("[", ",", "]")
         val clazz = sources match {
@@ -102,7 +102,7 @@ case class Node(
 )
 
 object Node {
-  def apply(stepName: String, step: PipelineStep, rootOutputUrl:URI): Node = {
+  def apply(stepName: String, step: PipelineStep, rootOutputUrl: URI): Node = {
     val stepInfo = step.stepInfo
     val outputMissing = step match {
       case persisted: PersistedProducer[_, _] =>
@@ -133,7 +133,7 @@ object Node {
 case class Link(fromId: String, toId: String, name: String)
 
 object Workflow {
-  def forPipeline(steps: Iterable[(String, PipelineStep)], rootOutputUrl:URI): Workflow = {
+  def forPipeline(steps: Iterable[(String, PipelineStep)], rootOutputUrl: URI): Workflow = {
     val rootOutputUrl1: URI = URIWithSchema(rootOutputUrl)
     val idToName = steps.map { case (k, v) => (v.stepInfo.signature.id, k) }.toMap
     def findNodes(s: PipelineStep): Iterable[PipelineStep] =
@@ -164,7 +164,7 @@ object Workflow {
     Workflow(nodes, links)
   }
 
-  def Relativize(uri:URI, rootOutputUrl:URI) : URI = {
+  def Relativize(uri: URI, rootOutputUrl: URI): URI = {
     val rootOutputWithSchema = Workflow.URIWithSchema(rootOutputUrl)
     /* The function org.allenai.pipeline.ArtifactFactory#createArtifact
      * adds "file://" schema to pipeline outputs.  If rootOutputUrl has
@@ -172,7 +172,7 @@ object Workflow {
      * decline to relativize pipeline outputs.  We use URIWithSchema to
      * get the paths to match.
      */
-      uri.relativize(rootOutputWithSchema)
+    uri.relativize(rootOutputWithSchema)
   }
 
   def URIWithSchema(uri: URI): URI = {
