@@ -113,7 +113,7 @@ object Node {
       case producer: Producer[_] => producer.executionInfo.status
       case _ => ""
     }
-    val relOutputLocation = stepInfo.outputLocation.map((uri:URI) => rootOutputUrl.relativize(uri))
+    val relOutputLocation = stepInfo.outputLocation.map(Workflow.Relativize(rootOutputUrl, _))
     Node(
       stepName,
       stepInfo.className,
@@ -134,6 +134,7 @@ case class Link(fromId: String, toId: String, name: String)
 
 object Workflow {
   def forPipeline(steps: Iterable[(String, PipelineStep)], rootOutputUrl:URI): Workflow = {
+    val rootOutputUrl1: URI = URIWithSchema(rootOutputUrl)
     val idToName = steps.map { case (k, v) => (v.stepInfo.signature.id, k) }.toMap
     def findNodes(s: PipelineStep): Iterable[PipelineStep] =
       Seq(s) ++ s.stepInfo.dependencies.flatMap {
@@ -147,7 +148,7 @@ object Workflow {
     } yield {
       val id = childStep.stepInfo.signature.id
       val childName = idToName.getOrElse(id, childStep.stepInfo.className)
-      (id, Node(childName, childStep, rootOutputUrl))
+      (id, Node(childName, childStep, rootOutputUrl1))
     }
 
     def findLinks(s: PipelineStepInfo): Iterable[(PipelineStepInfo, PipelineStepInfo, String)] =
@@ -161,6 +162,30 @@ object Workflow {
       (from, to, name) <- findLinks(step.stepInfo)
     } yield Link(from.signature.id, to.signature.id, name)).toSet
     Workflow(nodes, links)
+  }
+
+  def Relativize(uri:URI, rootOutputUrl:URI) : URI = {
+    val rootOutputWithSchema = Workflow.URIWithSchema(rootOutputUrl)
+    /* The function org.allenai.pipeline.ArtifactFactory#createArtifact
+     * adds "file://" schema to pipeline outputs.  If rootOutputUrl has
+     * no schema prefix, then java.net.URI.relativize will always
+     * decline to relativize pipeline outputs.  We use URIWithSchema to
+     * get the paths to match.
+     */
+      uri.relativize(rootOutputWithSchema)
+  }
+
+  def URIWithSchema(uri: URI): URI = {
+    uri.getScheme() match {
+      case null =>
+        new URI(
+          "file",
+          uri.getHost,
+          uri.getPath(),
+          uri.getFragment
+        )
+      case _ => uri
+    }
   }
 
   def upstreamDependencies(step: PipelineStep): Set[PipelineStep] = {
