@@ -1,6 +1,6 @@
 package org.allenai.pipeline
 
-import java.io.{ ByteArrayInputStream, File, FileWriter, InputStream }
+import java.io._
 import java.nio.file.Files
 import java.util.UUID
 
@@ -8,6 +8,7 @@ import org.allenai.common.Resource
 import org.allenai.pipeline.ExternalProcess._
 import org.allenai.pipeline.IoHelpers._
 import org.apache.commons.io.{ FileUtils, IOUtils }
+import org.slf4j.{ Logger, LoggerFactory }
 
 import scala.annotation.tailrec
 import scala.collection.JavaConverters._
@@ -25,7 +26,7 @@ import scala.collection.JavaConverters._
   *                        Producers based on ExternalProcess should be created with class RunExternalProcess.
   */
 class ExternalProcess(val commandTokens: CommandToken*) {
-
+  private val BUFFER_SIZE = 16384
   def run(
     inputs: Seq[Extarg],
     stdinput: () => InputStream = () => new ByteArrayInputStream(Array.emptyByteArray)
@@ -35,24 +36,11 @@ class ExternalProcess(val commandTokens: CommandToken*) {
       sys.addShutdownHook(FileUtils.deleteDirectory(scratchDir))
 
       val ab = argsBound(inputs, commandTokens).toList
-
-      import scala.sys.process._
-      val captureStdoutFile = new File(scratchDir, "stdout")
-      val captureStderrFile = new File(scratchDir, "stderr")
-      val out = new FileWriter(captureStdoutFile)
-      val err = new FileWriter(captureStderrFile)
-
-      val logger = ProcessLogger(
-        (o: String) => out.append(o),
-        (e: String) => err.append(e)
-      )
-
-      prepareInputPaths(ab, scratchDir)
       val cmd1: List[String] = cmd(ab, scratchDir)
 
-      val status = (cmd1 #< stdinput()) ! logger
-      out.close()
-      err.close()
+      prepareInputPaths(ab, scratchDir)
+      val (captureStdoutFile: File, captureStderrFile: File, status: Int) =
+        runI(stdinput, scratchDir, cmd1)
 
       val outputNames = commandTokens.collect { case OutputFileToken(name) => name }
 
@@ -65,9 +53,103 @@ class ExternalProcess(val commandTokens: CommandToken*) {
       CommandOutput(status, stdout, stderr, outputStreams.toMap)
     }
 
+  /** From https://github.com/scala/scala/blob/v2.11.5/src/library/scala/sys/process/ProcessIO.scala:
+    *
+    *   `ProcessBuilder` will call `writeInput`, `processOutput` and `processError`
+    *   in separate threads, and if daemonizeThreads is true, they will all be
+    *   marked as daemon threads.
+    */
+  private def runI(stdinput: () => InputStream, scratchDir: File, cmd1: List[String]) =
+    {
+      import scala.sys.process._
+
+      val captureStdoutFile = new File(scratchDir, "stdout")
+      val captureStderrFile = new File(scratchDir, "stderr")
+      Resource.using(new FileOutputStream(captureStdoutFile)) { out =>
+        Resource.using(new FileOutputStream(captureStderrFile)) { err =>
+          val threadA1 = Thread.currentThread()
+          var threadA: Option[Thread] = None
+          var threadB: Option[Thread] = None
+          var threadC: Option[Thread] = None
+          val prIo: ProcessIO = new ProcessIO(
+            (stdin: OutputStream) => {
+              threadA = Some(Thread.currentThread())
+              Resource.using(stdin) { stdin =>
+                val buffer = new Array[Byte](BUFFER_SIZE)
+                Resource.using(stdinput()) { is =>
+                  Iterator.continually(is.read(buffer)).takeWhile(_ != -1).foreach(n =>
+                    stdin.write(buffer, 0, n))
+                }
+              }
+            },
+            (isOut: InputStream) => {
+              Resource.using(isOut) { isOut =>
+                threadB = Some(Thread.currentThread())
+                Resource.using(new org.apache.commons.io.input.TeeInputStream(isOut, out)) { isOut2 =>
+                  Resource.using(new BufferedReader(new InputStreamReader(isOut2))) { readerOut =>
+                    var ln = readerOut.readLine()
+                    while (ln != null) {
+                      loggerOut.debug(ln)
+                      ln = readerOut.readLine()
+                    }
+                  }
+                }
+              }
+            },
+            (isErr: InputStream) => {
+              Resource.using(isErr) { isErr =>
+                threadC = Some(Thread.currentThread())
+                Resource.using(new org.apache.commons.io.input.TeeInputStream(isErr, err)) { isErr2 =>
+                  Resource.using(new BufferedReader(new InputStreamReader(isErr2))) { readerErr =>
+                    var ln = readerErr.readLine()
+                    while (ln != null) {
+                      loggerErr.debug(ln)
+                      ln = readerErr.readLine()
+                    }
+                  }
+                }
+              }
+            }
+          )
+
+          val stCmd1 = cmd1.mkString(" ")
+          loggerCommands.debug(s"about to run $stCmd1")
+          val p = Process(cmd1).run(prIo)
+
+          val status = p.exitValue()
+          loggerCommands.debug(s"process exited with status $status: $stCmd1")
+          while (threadA.isEmpty || threadB.isEmpty || threadC.isEmpty)
+            Thread.sleep(50)
+          threadB.get.join()
+          threadC.get.join()
+          threadA.get.interrupt()
+          threadA.get.join()
+          (captureStdoutFile, captureStderrFile, status)
+        }
+      }
+    }
+}
+
+/** An example of how to selectively enable logging is to add:
+  *     <logger name="org.allenai.pipeline.ExternalProcessLog.Commands" level="DEBUG"/>
+  *
+  * to the file core/src/test/resources/logback.xml.  Then run:
+  *
+  *     sbt test
+  *
+  * The result will be reporting of the commands and their statuses, but not their out/err consoles.
+  */
+package ExternalProcessLog {
+  class Commands {}
+  class Stdout {}
+  class Stderr {}
 }
 
 object ExternalProcess {
+
+  val loggerCommands = LoggerFactory.getLogger(classOf[ExternalProcessLog.Commands])
+  val loggerOut = LoggerFactory.getLogger(classOf[ExternalProcessLog.Stdout]);
+  val loggerErr = LoggerFactory.getLogger(classOf[ExternalProcessLog.Stderr]);
 
   trait Namable {
     def name: String

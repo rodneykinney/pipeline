@@ -125,6 +125,31 @@ class TestExternalProcess extends UnitSpec with ScratchDirectory {
     cLines should equal(3)
   }
 
+  it should "capture weird characters in stdout" in {
+    val weirds =
+      List(
+        ("", 0),
+        ("""\n""", 1),
+        ("""a\0""", 2),
+        ("""a\13""", 2),
+        ("""a\10""", 2),
+        ("""a """, 2),
+        ("""a\13\10""", 3),
+        ("""\0""", 1)
+      )
+    val surprises =
+      weirds.flatMap {
+        case (stWeird: String, cBytesExpected: Int) =>
+          val echo = new ExternalProcess("printf", stWeird)
+          val cBytes = scala.io.Source.fromInputStream(echo.run(Seq()).stdout()).length
+          if (cBytes == cBytesExpected)
+            List()
+          else
+            List(s"Length of '$stWeird' is $cBytes but expected $cBytesExpected")
+      }
+    surprises should equal(List())
+  }
+
   it should "capture stderr" in {
     val noSuchParameter = new ExternalProcess("touch", "-x", "foo")
     val stderr = IOUtils.readLines(noSuchParameter.run(Seq()).stderr()).asScala.mkString("\n")
@@ -170,7 +195,7 @@ class TestExternalProcess extends UnitSpec with ScratchDirectory {
     val echo = new ExternalProcess("echo", "hello", "world")
     val wc = new ExternalProcess("wc", "-c")
     val result = wc.run(Seq(), stdinput = echo.run(Seq()).stdout)
-    IOUtils.readLines(result.stdout()).asScala.head.trim().toInt should equal(11)
+    IOUtils.readLines(result.stdout()).asScala.head.trim().toInt should equal(12)
   }
 
   def consumeExtargForCoerceTest(absdScript: String, a: Extarg) = {
