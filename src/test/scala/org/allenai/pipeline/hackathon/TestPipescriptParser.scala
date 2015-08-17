@@ -48,15 +48,13 @@ class TestPipescriptParser extends UnitSpec {
   }
 
   it should "parse a small sample program" in {
-    def javaString(s: String) = JavaString(s""""$s"""")
-
     val simpleProgram =
-      """| package {source: "./scripts", id: "scripts"}
+      """| package {source: ./scripts, id: "scripts"}
         |
         |# Woohoo
         |run {input:"asdf",
-        |     ignore:"false"} `run`
-        |     {output:"fdsa"}
+        |     ignore:false} `run`
+        |     {output:s"fdsa"}
         |
         |run echo done""".stripMargin
 
@@ -64,14 +62,19 @@ class TestPipescriptParser extends UnitSpec {
     val parsed = parser.parseScript(simpleProgram).toList
 
     assert(parsed(0) === PackageStatement(KeyValuePairs(Seq(
-      KeyValue("source", javaString("./scripts")),
-      KeyValue("id", javaString("scripts"))
+      KeyValue("source", LiteralString("./scripts")),
+      KeyValue("id", JavaString("\"scripts\""))
     ))))
 
     assert(parsed(1) === RunStatement(List(
-      KeyValuePairsToken(KeyValuePairs(List(KeyValue("input", javaString("asdf")), KeyValue("ignore", javaString("false"))))),
+      KeyValuePairsToken(KeyValuePairs(List(
+        KeyValue("input", JavaString("\"asdf\"")),
+        KeyValue("ignore", LiteralString("false"))
+      ))),
       StringToken(LiteralString("run")),
-      KeyValuePairsToken(KeyValuePairs(List(KeyValue("output", javaString("fdsa")))))
+      KeyValuePairsToken(KeyValuePairs(List(
+        KeyValue("output", SubstitutionString("\"fdsa\""))
+      )))
     )))
 
     assert(parsed(2) === RunStatement(List(

@@ -36,7 +36,7 @@ run {file:GetFeatureVectorsFromEF.sh, package:aristoScripts}
   $test2
   Test
 
-# Generate ablation data for a given solver sett
+# Generate ablation data for a given solver set
 run {file:SolverAblationStudy.sh, package:aristoScripts} 
   -s "Arizona,Inference,Lucene,Lucience,Salience"
   -o {output:ablationOutputDir, type:dir, suffix:.zip} 
