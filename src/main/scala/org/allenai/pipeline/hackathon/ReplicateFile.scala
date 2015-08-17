@@ -1,35 +1,14 @@
 package org.allenai.pipeline.hackathon
 
-import org.allenai.common.Resource
-import org.allenai.pipeline._
-
 import java.io.{ File, FileInputStream, InputStream, SequenceInputStream }
 import java.util.Collections
 
-case class ReplicateFile(
-  resource: Either[(File, String => FlatArtifact), (FlatArtifact, FlatArtifact => String)]
-)
-    extends ReplicateResource[FlatArtifact](resource) {
-  override protected[this] def computeChecksum(file: File) =
-    InputStreamChecksum(new FileInputStream(file))
+import org.allenai.common.Resource
+import org.allenai.pipeline._
 
-  override protected[this] def upload(file: File) = UploadFile.write(file, artifact)
-
-  protected[this] def download(artifact: FlatArtifact): File = UploadFile.read(artifact)
-}
-
-case class ReplicateDirectory(
-    resource: Either[(File, String => StructuredArtifact), (StructuredArtifact, StructuredArtifact => String)]
-) extends ReplicateResource[StructuredArtifact](resource) {
-  override protected[this] def computeChecksum(file: File) =
-    InputStreamChecksum.forDirectory(file)
-
-  override protected[this] def upload(file: File) = UploadDirectory.write(file, artifact)
-
-  protected[this] def download(artifact: StructuredArtifact): File = UploadDirectory.read(artifact)
-}
-
-/** If resource is an Artifact, then it has already been uploaded:
+/** Replicates a file (or directory) to a shared location
+  *
+  * If resource is an Artifact, then it has already been uploaded:
   * Download and return a local copy
   * If resource is a File:
   * compute a checksum,
@@ -90,6 +69,29 @@ abstract class ReplicateResource[T <: Artifact](
       .addParameters("src" -> artifact.url)
 }
 
+case class ReplicateFile(
+  resource: Either[(File, String => FlatArtifact), (FlatArtifact, FlatArtifact => String)]
+)
+    extends ReplicateResource[FlatArtifact](resource) {
+  override protected[this] def computeChecksum(file: File) =
+    InputStreamChecksum(new FileInputStream(file))
+
+  override protected[this] def upload(file: File) = UploadFile.write(file, artifact)
+
+  override protected[this] def download(artifact: FlatArtifact): File = UploadFile.read(artifact)
+}
+
+case class ReplicateDirectory(
+    resource: Either[(File, String => StructuredArtifact), (StructuredArtifact, StructuredArtifact => String)]
+) extends ReplicateResource[StructuredArtifact](resource) {
+  override protected[this] def computeChecksum(file: File) =
+    InputStreamChecksum.forDirectory(file)
+
+  override protected[this] def upload(file: File) = UploadDirectory.write(file, artifact)
+
+  override protected[this] def download(artifact: StructuredArtifact): File = UploadDirectory.read(artifact)
+}
+
 object InputStreamChecksum {
   def apply(input: InputStream) = {
     var hash = 0L
@@ -110,3 +112,4 @@ object InputStreamChecksum {
     this(new SequenceInputStream(Collections.enumeration(streams.toList.asJava)))
   }
 }
+
