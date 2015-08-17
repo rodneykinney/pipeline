@@ -52,7 +52,7 @@ run {file:AblationStudyReport.m, package:mathematicaScripts}
   -csv {output:ablationCSVData, suffix:.csv}
 
 # Run analysis in Python
-run {file:runiPythonNotebook.sh, package:pythonScripts} 
+run {file:runiPythonNotebook.sh, package:pythonScripts}
   {file:testScript.ipynb, package:pythonScripts} 
   {ref:ablationOutputDir} 
   {output:pythonHTMLNotebook, suffix:.html}

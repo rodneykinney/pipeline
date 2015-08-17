@@ -15,11 +15,10 @@ class PipescriptCompiler() {
 
   def compile(statements: TraversableOnce[PipescriptParser.Statement]): Pipescript = {
     var packages = Vector.empty[hackathon.Package]
-    var stepCommands = Vector.empty[hackathon.StepCommand]
+    var stepCommands = Vector.empty[hackathon.RunCommand]
 
     var environment = MMap.empty[String, String]
     statements.map(_.resolve(environment)) foreach {
-      case PipescriptParser.CommentStatement(_) =>
       // The call to resolve above has already modified the environment
       case PipescriptParser.SetStatement(block) =>
       case PipescriptParser.PackageStatement(block) =>
@@ -28,7 +27,7 @@ class PipescriptCompiler() {
         val sourceUri = new URI(source)
         packages :+= hackathon.Package(id, sourceUri)
       case PipescriptParser.RunStatement(tokens) =>
-        stepCommands :+= StepCommand(tokens.map(transformToken))
+        stepCommands :+= RunCommand(tokens.map(transformToken))
     }
 
     def transformToken(scriptToken: PipescriptParser.Token): CommandToken = {

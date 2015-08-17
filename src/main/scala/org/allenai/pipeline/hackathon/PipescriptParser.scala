@@ -23,14 +23,6 @@ object PipescriptParser {
     def resolve(env: MMap[String, String]): Statement
   }
 
-  /** A comment statement is ignored.
-    *
-    * @param comment the text of the comment.
-    */
-  case class CommentStatement(comment: String) extends Statement {
-    def resolve(env: MMap[String, String]) = this
-  }
-
   /** A variable statement sets one or more variables to the associated values.
     */
   case class SetStatement(block: KeyValuePairs) extends Statement {
@@ -176,13 +168,13 @@ object PipescriptParser {
   class Parser extends JavaTokenParsers {
     def script: Parser[TraversableOnce[Statement]] = rep(line)
 
-//    def line = comment | variableStatement | packageStatement | stepStatement
+    //    def line = comment | variableStatement | packageStatement | stepStatement
     def line = packageStatement | variableStatement | stepStatement
 
-//    override protected val whiteSpace = """\s+|(#[^\n\r]*[\n\r]+)""".r
+    //    override protected val whiteSpace = """\s+|(#[^\n\r]*[\n\r]+)""".r
     override protected val whiteSpace = """(\s|#.*)+""".r
 
-//    def comment = """#[^\n\r]*[\n\r]*""".r ^^ CommentStatement
+    //    def comment = """#[^\n\r]*[\n\r]*""".r ^^ CommentStatement
 
     def packageStatement = "package" ~> propertyBag ^^ PackageStatement
 
@@ -190,28 +182,26 @@ object PipescriptParser {
 
     def variableStatement = "set" ~> propertyBag ^^ SetStatement
 
-    def token: Parser[Token] = argToken | stringToken
+    def token: Parser[Token] = keyValuePairsToken | stringToken
 
-    def argToken = propertyBag ^^ { block => KeyValuePairsToken(block) }
+    def keyValuePairsToken = propertyBag ^^ KeyValuePairsToken
 
-    def stringToken = stringExp ^^ StringToken
+    def stringToken = (stringExp | nonKeywordLiteralString) ^^ StringToken
 
-    def bareString = (not(reserved) ~> """[^{}\s`:,]+""".r) | quotedKeyword
+    def nonKeywordLiteralString = ((not(reserved) ~> simpleString) | ("`" ~> reserved <~ "`")) ^^ LiteralString
+
+    def simpleString = """[^{}\s`:,]+""".r
 
     def reserved = "run" | "package" | "set"
 
-    def quotedKeyword = "`" ~> reserved <~ "`"
-
-    def stringExp = substitutionString | javaString | variableReference | literalString
+    def stringExp = substitutionString | javaString | variableReference
     def substitutionString = "s" ~> stringLiteral ^^ SubstitutionString
     def javaString = stringLiteral ^^ JavaString
-    def literalString = bareString ^^ LiteralString
     def variableReference = simpleVariableReference | complexVariableReference
     def simpleVariableReference = "$" ~> """\w+""".r ^^ VariableReference
     def complexVariableReference = "${" ~> """\w+""".r <~ "}" ^^ VariableReference
 
-    /** A block is a JSON or Typesafe Config style block between braces.
-      * However, it is never nested.
+    /** A JSON or Typesafe Config style block between braces, without nesting
       *
       * { name: "pipescript", value: ${var} }
       */
@@ -220,7 +210,7 @@ object PipescriptParser {
     /** An argument list, separated by comma. */
     def keyValuePairs: Parser[List[KeyValue]] = repsep(keyValue, ",")
     /** An argument, which is a key, value pair. */
-    def keyValue: Parser[KeyValue] = term ~ ":" ~ stringExp ^^ { case term ~ ":" ~ value => KeyValue(term, value) }
+    def keyValue: Parser[KeyValue] = term ~ ":" ~ (stringExp | simpleString ^^ LiteralString) ^^ { case term ~ ":" ~ value => KeyValue(term, value) }
 
     /** A term may only have letters. */
     def term: Parser[String] = """\w+""".r

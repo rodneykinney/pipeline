@@ -43,8 +43,8 @@ class TestPipescriptParser extends UnitSpec {
         |run echo s"abc-$x"
       """.stripMargin
     val script = new PipescriptCompiler().compileScript(program)
-    assert(script.stepCommands.map(_.scriptText).find(_.indexOf("echo foo.txt") >= 0).nonEmpty)
-    assert(script.stepCommands.map(_.scriptText).find(_.indexOf("echo abc-foo.txt") >= 0).nonEmpty)
+    assert(script.runCommands.map(_.scriptText).find(_.indexOf("echo foo.txt") >= 0).nonEmpty)
+    assert(script.runCommands.map(_.scriptText).find(_.indexOf("echo abc-foo.txt") >= 0).nonEmpty)
   }
 
   it should "parse a small sample program" in {
@@ -68,15 +68,13 @@ class TestPipescriptParser extends UnitSpec {
       KeyValue("id", javaString("scripts"))
     ))))
 
-    assert(parsed(1).isInstanceOf[CommentStatement])
-
-    assert(parsed(2) === RunStatement(List(
+    assert(parsed(1) === RunStatement(List(
       KeyValuePairsToken(KeyValuePairs(List(KeyValue("input", javaString("asdf")), KeyValue("ignore", javaString("false"))))),
       StringToken(LiteralString("run")),
       KeyValuePairsToken(KeyValuePairs(List(KeyValue("output", javaString("fdsa")))))
     )))
 
-    assert(parsed(3) === RunStatement(List(
+    assert(parsed(2) === RunStatement(List(
       StringToken(LiteralString("echo")), StringToken(LiteralString("done"))
     )))
   }

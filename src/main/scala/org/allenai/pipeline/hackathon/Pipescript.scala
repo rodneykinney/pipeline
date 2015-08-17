@@ -10,7 +10,7 @@ case class PipescriptSources(
 /** Model that a workflow script is parsed into */
 case class Pipescript(
     packages: Seq[Package],
-    stepCommands: Seq[StepCommand]
+    runCommands: Seq[RunCommand]
 ) {
 
   /** Text that can be parsed into this script.
@@ -24,7 +24,7 @@ case class Pipescript(
       buffer.append(pkg.scriptText).append("\n")
     }
     buffer.append("\n")
-    stepCommands foreach { step =>
+    runCommands foreach { step =>
       buffer.append(step.scriptText).append("\n")
     }
     buffer.mkString
@@ -45,7 +45,7 @@ case class Package(id: String, source: URI) {
   * {in:$scripts/ExtractArrows.py} -i {in:./png, id:pngDir} -o {out:arrowDir, type:dir}
   * }}}
   */
-case class StepCommand(tokens: Seq[CommandToken]) {
+case class RunCommand(tokens: Seq[CommandToken]) {
   /** Lookup output files by ID */
   def outputFiles: Map[String, CommandToken.OutputFile] = (tokens collect {
     case f: CommandToken.OutputFile => (f.id, f)

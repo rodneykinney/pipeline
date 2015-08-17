@@ -18,6 +18,36 @@ class TestPipescriptCompiler extends UnitSpec {
     val parsed = parser.compileScript(program)
   }
 
+  it should "handle all sorts of variable substitution" in {
+    def checkResult(scriptText: String, expectedArg: String) = {
+      val script = new PipescriptCompiler().compileScript(scriptText)
+      script.runCommands.head.tokens.head.scriptText should equal(expectedArg)
+    }
+    checkResult("""set {foo: bar} run $foo""", "bar")
+    checkResult("""set {foo: bar} run ${foo}""", "bar")
+    checkResult("""set {foo: bar} run s"$foo" """, "bar")
+    checkResult("""set {foo: bar} run s"${foo}" """, "bar")
+    checkResult("""set {bar: baz} set {foo: $bar} run $foo""", "baz")
+    checkResult("""set {bar: baz} set {foo: ${bar}} run $foo""", "baz")
+    checkResult("""set {bar: baz} set {foo: s"$bar"} run $foo""", "baz")
+    checkResult("""set {bar: baz} set {foo: s"${bar}"} run $foo""", "baz")
+    checkResult("""set {bar: baz} set {foo: s"${bar}ooka"} run $foo""", "bazooka")
+  }
+
+  it should "handle keywords appropriately" in {
+    def checkResult(scriptText: String, expectedArg: String) = {
+      val script = new PipescriptCompiler().compileScript(scriptText)
+      script.runCommands.head.tokens.head.scriptText should equal(expectedArg)
+    }
+    checkResult("""set {run: bar} run $run""", "bar")
+    checkResult("""set {run: package} run $run""", "package")
+    checkResult("""set {running: setting} run $running""", "setting")
+    checkResult("""run `run`""", "run")
+    a[NoSuchElementException] shouldBe thrownBy {
+      checkResult("run run", "")
+    }
+  }
+
   it should "successfully parse the sample vision workflow" in {
     val scriptText = loadResource("/pipeline/vision-workflow.pipe")
 
@@ -25,23 +55,21 @@ class TestPipescriptCompiler extends UnitSpec {
     val workflow = parser.compileScript(scriptText)
 
     assert(workflow.packages.size === 1)
-    assert(workflow.stepCommands.size === 4)
+    assert(workflow.runCommands.size === 4)
   }
 
   it should "handle comments correctly" in {
-//    val p = new PipescriptParser.Parser()
-//    assert(p.parse(p.comment, "#hi, there\n#run echo hi").successful)
     val scriptText =
       """
         |# First line
         |run echo hi # End of line commend
-        |# Line with keywords, such as set
+        |# Line with keywords, such as set or package, or even run
         |run echo hi again
       """.stripMargin
     val script = new PipescriptCompiler().compileScript(scriptText)
-    script.stepCommands.size should equal(2)
+    script.runCommands.size should equal(2)
     // Make sure we don't include the comments as tokens in the run statement
-    script.stepCommands.map(_.tokens.size).sorted.toList should equal(List(2,3))
+    script.runCommands.map(_.tokens.size).sorted.toList should equal(List(2, 3))
   }
 
   it should "successfully parse the sample aristo workflow" in {
@@ -51,8 +79,7 @@ class TestPipescriptCompiler extends UnitSpec {
     val workflow = parser.compileScript(scriptText)
 
     assert(workflow.packages.size === 3)
-//    assert(workflow.stepCommands.size > 0)
-    assert(workflow.stepCommands.size === 7)
+    assert(workflow.runCommands.size === 7)
   }
 
   it should "build a pipeline from a script" in {

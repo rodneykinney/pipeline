@@ -48,7 +48,7 @@ class PipescriptPipeline(val pipeline: Pipeline) {
     }
 
     // 2. Create the RunProcess steps
-    script.stepCommands foreach { stepCommand =>
+    script.runCommands foreach { stepCommand =>
       val args: Seq[ProcessArg] = stepCommand.tokens map {
 
         case CommandToken.PackagedInput(packageId, path) =>
@@ -139,7 +139,7 @@ class PipescriptPipeline(val pipeline: Pipeline) {
         pkg.copy(source = replicatedDirProducer(pkg.source).artifact.url)
       }
     val steps =
-      for (cmd <- script.stepCommands) yield {
+      for (cmd <- script.runCommands) yield {
         val tokens =
           for (token <- cmd.tokens) yield token match {
             case InputDir(url) =>
@@ -148,7 +148,7 @@ class PipescriptPipeline(val pipeline: Pipeline) {
               InputFile(replicatedFileProducer(url).artifact.url)
             case other => other
           }
-        StepCommand(tokens)
+        RunCommand(tokens)
       }
     Pipescript(packages, steps)
   }

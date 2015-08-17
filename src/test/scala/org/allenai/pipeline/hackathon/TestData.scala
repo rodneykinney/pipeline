@@ -8,8 +8,8 @@ object TestData {
     packages = Seq(
       Package(id = "scripts", source = new URI("./vision-py/scripts"))
     ),
-    stepCommands = Seq(
-      StepCommand(
+    runCommands = Seq(
+      RunCommand(
         Seq(
           StringToken("python"),
           PackagedInput("scripts", "ExtractArrows.py"),
@@ -19,7 +19,7 @@ object TestData {
           OutputDir("arrowDir")
         )
       ),
-      StepCommand(
+      RunCommand(
         Seq(
           StringToken("python"),
           PackagedInput("scripts", "ExtractBlobs.py"),
@@ -29,7 +29,7 @@ object TestData {
           OutputDir("blobsDir")
         )
       ),
-      StepCommand(
+      RunCommand(
         Seq(
           StringToken("python"),
           PackagedInput("scripts", "ExtractText.py"),
@@ -39,7 +39,7 @@ object TestData {
           OutputDir("textDir")
         )
       ),
-      StepCommand(
+      RunCommand(
         Seq(
           StringToken("python"),
           PackagedInput("scripts", "ExtractRelations.py"),
