@@ -35,17 +35,20 @@ class TestPipescriptCompiler extends UnitSpec {
   }
 
   it should "handle keywords appropriately" in {
+    val compiler = new PipescriptCompiler()
     def checkResult(scriptText: String, expectedArg: String) = {
-      val script = new PipescriptCompiler().compileScript(scriptText)
+      val script = compiler.compileScript(scriptText)
       script.runCommands.head.tokens.head.scriptText should equal(expectedArg)
     }
+    
     checkResult("""set {run: bar} run $run""", "bar")
     checkResult("""set {run: package} run $run""", "package")
     checkResult("""set {running: setting} run $running""", "setting")
+    checkResult("""run running""", "running")
     checkResult("""run `run`""", "run")
-    a[NoSuchElementException] shouldBe thrownBy {
-      checkResult("run run", "")
-    }
+
+    compiler.compileScript("run run again").runCommands.map(_.tokens.size) should equal(List(0, 1))
+    compiler.compileScript("run run").runCommands.map(_.tokens.size) should equal(List(0, 0))
   }
 
   it should "successfully parse the sample vision workflow" in {

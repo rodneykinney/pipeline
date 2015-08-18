@@ -1,8 +1,8 @@
 package org.allenai.pipeline.hackathon
 
 import org.apache.commons.lang3.StringEscapeUtils
-import scala.collection.mutable.{ Map => MMap }
 
+import scala.collection.mutable.{ Map => MMap }
 import scala.util.matching.Regex
 import scala.util.matching.Regex.Match
 import scala.util.parsing.combinator._
@@ -34,6 +34,7 @@ object PipescriptParser {
       SetStatement(resolvedBlock)
     }
   }
+
   /** A package statement specifies the scripts to store so the experiment is repeatable.
     *
     * @param block a typesafe-config like block specifying arguments
@@ -72,8 +73,10 @@ object PipescriptParser {
         throw new IllegalArgumentException(s"Could not find key '${name}' in arguments: " + keyValuePairs)
       }
     }
+
     def resolve(env: MMap[String, String]) = KeyValuePairs(keyValuePairs.map(_.resolve(env)))
   }
+
   case class KeyValue(key: String, value: StringExp) {
     def resolve(env: MMap[String, String]) = KeyValue(key, value.resolve(env))
   }
@@ -85,9 +88,11 @@ object PipescriptParser {
   sealed abstract class Token {
     def resolve(env: MMap[String, String]): Token
   }
+
   case class StringToken(value: StringExp) extends Token {
     def resolve(env: MMap[String, String]) = StringToken(value.resolve(env))
   }
+
   case class KeyValuePairsToken(keyValuePairs: KeyValuePairs) extends Token {
     def resolve(env: MMap[String, String]) = KeyValuePairsToken(keyValuePairs.resolve(env))
   }
@@ -99,11 +104,14 @@ object PipescriptParser {
     */
   sealed abstract class StringExp {
     def asString: String
+
     def resolve(environment: MMap[String, String]): LiteralString
   }
+
   /** i.e. ${var} */
   case class VariableReference(name: String) extends StringExp {
     def asString = sys.error(s"Unresolved variable $name")
+
     def resolve(environment: MMap[String, String]): LiteralString =
       environment.get(name).map(LiteralString.apply).getOrElse {
         throw new IllegalArgumentException(s"Could not find variable '$name' in environment: $environment")
@@ -115,12 +123,14 @@ object PipescriptParser {
     */
   case class JavaString(s: String) extends StringExp {
     def asString = StringHelpers.unescape(StringHelpers.stripQuotes(s))
+
     def resolve(environment: MMap[String, String]): LiteralString = LiteralString(asString)
   }
 
   /** A literal string without quotes, escaping, or anything else */
   case class LiteralString(s: String) extends StringExp {
     def asString = s
+
     def resolve(environment: MMap[String, String]): LiteralString = this
   }
 
@@ -129,7 +139,9 @@ object PipescriptParser {
     */
   case class SubstitutionString(stringLiteral: String) extends StringExp {
     val stringBody = StringHelpers.stripQuotes(stringLiteral)
+
     def asString: String = sys.error(s"String literal with unresolved escape characters: $stringLiteral")
+
     def resolve(env: MMap[String, String]): LiteralString = {
       case class Replacement(regex: Regex, logic: Match => String)
 
@@ -155,10 +167,13 @@ object PipescriptParser {
       LiteralString(StringHelpers.unescape(replaced))
     }
   }
+
   object StringHelpers {
     val bracesVariableRegex = """(?<!\\)\$\{([^}]+)\}""".r
     val plainVariableRegex = """(?<!\\)\$(\w+)""".r
+
     def stripQuotes(s: String) = s.substring(1, s.length - 1)
+
     def unescape(s: String) = {
       StringEscapeUtils.unescapeJava(s)
     }
@@ -186,19 +201,44 @@ object PipescriptParser {
 
     def keyValuePairsToken = propertyBag ^^ KeyValuePairsToken
 
-    def stringToken = (stringExp | nonKeywordLiteralString) ^^ StringToken
+    def stringToken = (stringExp | nonKeywordOrQuotedKeyword) ^^ StringToken
 
-    def nonKeywordLiteralString = ((not(reserved) ~> simpleString) | ("`" ~> reserved <~ "`")) ^^ LiteralString
+    def nonKeywordOrQuotedKeyword = (nonKeyword | ("`" ~> reserved <~ "`")) ^^ LiteralString
+
+    // We need to do backtracking in this one case, to handle unquoted strings with a keyword prefix
+    def nonKeyword =
+      new Parser[String] {
+        def apply(in: Input) = {
+          reserved(in) match {
+            // Starts with a keyword. Fail if next token is whitespace
+            case Success(_, next) =>
+              if (Character.isWhitespace(next.first) || next.atEnd) {
+                val matchedKeyword = in.source.subSequence(in.offset, next.offset)
+                Failure(s"Keyword '$matchedKeyword' not allowed", next)
+              } else {
+                simpleString(in)
+              }
+            // Does not start with a keyword
+            case Failure(_, _) => simpleString(in)
+            case err => err
+          }
+        }
+      }
 
     def simpleString = """[^{}\s`:,]+""".r
 
     def reserved = "run" | "package" | "set"
 
     def stringExp = substitutionString | javaString | variableReference
+
     def substitutionString = "s" ~> stringLiteral ^^ SubstitutionString
+
     def javaString = stringLiteral ^^ JavaString
+
     def variableReference = simpleVariableReference | complexVariableReference
+
     def simpleVariableReference = "$" ~> """\w+""".r ^^ VariableReference
+
     def complexVariableReference = "${" ~> """\w+""".r <~ "}" ^^ VariableReference
 
     /** A JSON or Typesafe Config style block between braces, without nesting
@@ -209,6 +249,7 @@ object PipescriptParser {
 
     /** An argument list, separated by comma. */
     def keyValuePairs: Parser[List[KeyValue]] = repsep(keyValue, ",")
+
     /** An argument, which is a key, value pair. */
     def keyValue: Parser[KeyValue] = term ~ ":" ~ (stringExp | simpleString ^^ LiteralString) ^^ { case term ~ ":" ~ value => KeyValue(term, value) }
 
@@ -223,4 +264,5 @@ object PipescriptParser {
       }
     }
   }
+
 }
