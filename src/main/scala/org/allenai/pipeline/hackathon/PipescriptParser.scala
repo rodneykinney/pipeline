@@ -212,7 +212,7 @@ object PipescriptParser {
           reserved(in) match {
             // Starts with a keyword. Fail if next token is whitespace
             case Success(_, next) =>
-              if (Character.isWhitespace(next.first) || next.atEnd) {
+              if (next.atEnd || next.first == '#' || Character.isWhitespace(next.first)) {
                 val matchedKeyword = in.source.subSequence(in.offset, next.offset)
                 Failure(s"Keyword '$matchedKeyword' not allowed", next)
               } else {

@@ -40,7 +40,7 @@ class TestPipescriptCompiler extends UnitSpec {
       val script = compiler.compileScript(scriptText)
       script.runCommands.head.tokens.head.scriptText should equal(expectedArg)
     }
-    
+
     checkResult("""set {run: bar} run $run""", "bar")
     checkResult("""set {run: package} run $run""", "package")
     checkResult("""set {running: setting} run $running""", "setting")
@@ -49,6 +49,7 @@ class TestPipescriptCompiler extends UnitSpec {
 
     compiler.compileScript("run run again").runCommands.map(_.tokens.size) should equal(List(0, 1))
     compiler.compileScript("run run").runCommands.map(_.tokens.size) should equal(List(0, 0))
+    compiler.compileScript("run run#nothing\n run").runCommands.map(_.tokens.size) should equal(List(0, 0, 0))
   }
 
   it should "successfully parse the sample vision workflow" in {
