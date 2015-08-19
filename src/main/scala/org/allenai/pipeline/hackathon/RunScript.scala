@@ -1,8 +1,9 @@
 package org.allenai.pipeline.hackathon
 
-import org.allenai.common.Resource
+import org.allenai.common.{ Logging, Resource }
 import org.allenai.pipeline.FlatArtifact
 import org.allenai.pipeline.s3.S3Pipeline
+import org.apache.commons.io.FileUtils
 
 import scala.io.Source
 
@@ -10,11 +11,12 @@ import java.io.{ File, PrintWriter }
 import java.net.URI
 import java.nio.file.Files
 
-object RunScript extends App {
+object RunScript extends App with Logging {
   if (args.length == 0) {
     println("Usage: RunScript <script file> [output-url]")
     System.exit(1)
   }
+  logger.info(s"Reading script file ${args(0)}")
   val scriptFile = new File(args(0))
 
   val scriptText = Source.fromFile(scriptFile).mkString
@@ -42,8 +44,9 @@ object RunScript extends App {
 
   val portableScriptUrl = {
     val portableScriptText = interpreter.makePortable(script).scriptText
-    val tmpFile = Files.createTempFile("portable", "pipe").toFile
-    tmpFile.deleteOnExit()
+    val tmpDir = Files.createTempDirectory("pipeline").toFile
+    sys.addShutdownHook(FileUtils.deleteDirectory(tmpDir))
+    val tmpFile = new File(tmpDir, scriptFile.getName())
     Resource.using(new PrintWriter(tmpFile)) {
       _.print(portableScriptText)
     }
