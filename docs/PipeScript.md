@@ -70,19 +70,19 @@ package may be used by `run` commands by specifying a *file* resource. The most 
 
     package {id:<package-id>, source:<source-url>}
 
-where *<package-id>* is unique name for the package and *<source-url>* is a file path to a local directory or `s3:`
-url pointing to a zip file (which will be downloaded and expanded). 
+where *package-id* is a unique name for the package and *source-url* is a file path to a local directory or `s3:`
+URL pointing to a zip file (which will be downloaded and expanded).
 
 ## Run Command
 The `run` command indicates a system process to execute.
 
     run <args>
-    
+
 where each argument is either a string (as defined above) or a *resource*. A *resource* is specified 
 by `key:value` pairs separated by commas within curly braces. The different kinds of resources are:
 
 #### `{input:<source-url>, type:<file|dir>}` 
-An input file or directory, where *source-url* is a local file path or `s3:` URL. 
+An input file or directory, where *source-url* is a local file path or `s3:` URL.
 At runtime, this will resolve to an absolute filesystem path.  If not
 specified, the default type is `file`.
 

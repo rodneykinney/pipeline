@@ -35,7 +35,7 @@ s&quot;url=\&quot;${var2}\&quot;&quot;        # =&gt; url=&quot;http://www.examp
 <h2 id="packages">Packages</h2>
 <p>A <em>package</em> is a directory of files. It will be uploaded to the output location. Files within the package may be used by <code>run</code> commands by specifying a <em>file</em> resource. The most common use is for directories containing script files.</p>
 <pre><code>package {id:&lt;package-id&gt;, source:&lt;source-url&gt;}</code></pre>
-<p>where <em><package-id></em> is unique name for the package and <em><source-url></em> is a file path to a local directory or <code>s3:</code> url pointing to a zip file (which will be downloaded and expanded).</p>
+<p>where <em>package-id</em> is a unique name for the package and <em>source-url</em> is a file path to a local directory or <code>s3:</code> url pointing to a zip file (which will be downloaded and expanded).</p>
 <h2 id="run-command">Run Command</h2>
 <p>The <code>run</code> command indicates a system process to execute.</p>
 <pre><code>run &lt;args&gt;</code></pre>
