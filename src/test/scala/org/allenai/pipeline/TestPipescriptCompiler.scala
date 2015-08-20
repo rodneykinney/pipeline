@@ -74,7 +74,7 @@ class TestPipescriptCompiler extends UnitSpec {
   }
 
   it should "successfully parse the sample aristo workflow" in {
-    val scriptText = loadResource("/pipeline/ablation-study.pipe")
+    val scriptText = loadResource("/pipeline/aristo-example/ablation-study.pipe")
 
     val workflow = PipeScriptCompiler.compileScript(scriptText)
 

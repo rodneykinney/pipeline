@@ -17,7 +17,6 @@ publishArtifact in Test := false
 pomIncludeRepository := { _ => false }
 licenses := Seq("Apache 2.0" -> new URL("http://www.apache.org/licenses/LICENSE-2.0.txt"))
 homepage := Some(url("https://github.com/allenai/pipeline"))
-//assemblyJarName in assembly := "allenai-pipeline.jar"
 scmInfo := Some(
   ScmInfo(url("https://github.com/allenai/pipeline"), "https://github.com/allenai/pipeline.git")
 )
