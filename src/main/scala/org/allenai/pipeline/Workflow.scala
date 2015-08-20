@@ -7,6 +7,7 @@ import org.allenai.common.Resource
 import spray.json.DefaultJsonProtocol._
 import spray.json._
 
+import scala.collection.mutable.ListBuffer
 import scala.io.Source
 
 /** DAG representation of the execution of a set of Producers.
@@ -75,8 +76,25 @@ case class Workflow(nodes: Map[String, Node], links: Iterable[Link], title: Stri
           case _ => ""
         }
         val name = info.stepName
-        val desc = unescape(info.description.getOrElse(if (name == info.className) "" else info.className))
-          .split("\n").map(linkUrlsInString(_)).mkString("<ul><li>", "</li><li>", "</li></ul>")
+        val desc = {
+          // Word wrap the description
+          val text = unescape(info.description.getOrElse(if (name == info.className) "" else info.className))
+            .split("""\s+""").map(linkUrlsInString)
+          val textLines = new ListBuffer[String]
+          val currentLine = new StringBuilder
+          for (idx <- 0 until text.size) {
+            if (currentLine.toString.size > 0 && currentLine.toString.size + text(idx).size > DEFAULT_MAX_SIZE) {
+              textLines += currentLine.toString
+              currentLine.clear()
+              currentLine.append(text(idx))
+            } else {
+              if (currentLine.toString.size > 0) currentLine.append(" ")
+              currentLine.append(text(idx))
+            }
+          }
+          if (currentLine.toString.size > 0) textLines += currentLine.toString
+          textLines.mkString("<ul><li>", "</li><li>", "</li></ul>")
+        }
         s"""        g.setNode("$id", {
                                     |       class: "$clazz",
                                                             |       labelType: "html",

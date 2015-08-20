@@ -192,7 +192,7 @@ class RunProcess(
     super.stepInfo
       .copy(
         classVersion = versionId,
-        description = Some(cmd.mkString("\n"))
+        description = Some(cmd.mkString(" "))
       )
       .addParameters("cmd" -> cmd.mkString(" "))
       .addParameters(inputFiles: _*)
