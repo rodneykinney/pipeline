@@ -1,11 +1,14 @@
 package org.allenai.pipeline
 
+import java.io.File
+import java.net.URI
+import java.text.SimpleDateFormat
+import java.util.Date
+
+import com.typesafe.config.Config
 import org.allenai.common.Config._
 import org.allenai.common.Logging
 import org.allenai.pipeline.IoHelpers._
-import org.allenai.pipeline.hackathon.PipescriptSources
-
-import com.typesafe.config.Config
 import spray.json.DefaultJsonProtocol._
 import spray.json.JsonFormat
 
@@ -13,11 +16,6 @@ import scala.collection.JavaConverters._
 import scala.reflect.ClassTag
 import scala.util.Try
 import scala.util.control.NonFatal
-
-import java.io.File
-import java.net.URI
-import java.text.SimpleDateFormat
-import java.util.Date
 
 /** A top-level data flow pipeline.
   * Provides methods for persisting Producers in a consistent location,

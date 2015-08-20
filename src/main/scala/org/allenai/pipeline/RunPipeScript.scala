@@ -1,17 +1,18 @@
-package org.allenai.pipeline.hackathon
-
-import org.allenai.common.{ Logging, Resource }
-import org.allenai.pipeline.FlatArtifact
-import org.allenai.pipeline.s3.S3Pipeline
-import org.apache.commons.io.FileUtils
-
-import scala.io.Source
+package org.allenai.pipeline
 
 import java.io.{ File, PrintWriter }
 import java.net.URI
 import java.nio.file.Files
 
-object RunScript extends App with Logging {
+import org.allenai.common.{ Logging, Resource }
+import org.allenai.pipeline.s3.S3Pipeline
+import org.apache.commons.io.FileUtils
+
+import scala.io.Source
+
+/** Created by rodneykinney on 8/20/15.
+  */
+object RunPipeScript extends App with Logging {
   if (args.length == 0) {
     println("Usage: RunScript <script file> [output-url]")
     System.exit(1)
@@ -33,8 +34,8 @@ object RunScript extends App with Logging {
       pipeline.rootOutputUrl, s"scripts/$name"
     )
 
-  val script = new PipescriptCompiler().compileScript(scriptText)
-  val interpreter = new PipescriptPipeline(S3Pipeline(outputUrl))
+  val script = PipeScriptCompiler.compileScript(scriptText)
+  val interpreter = new PipeScriptInterpreter(S3Pipeline(outputUrl))
   val pipeline = interpreter.buildPipeline(script)
   val originalScriptUrl = {
     val upload = new ReplicateFile(Left((scriptFile, scriptUploadLocation _)))

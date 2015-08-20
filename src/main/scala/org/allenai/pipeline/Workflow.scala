@@ -2,7 +2,6 @@ package org.allenai.pipeline
 
 import java.net.URI
 
-import org.allenai.pipeline.hackathon.PipescriptSources
 import org.allenai.common.Resource
 import spray.json.DefaultJsonProtocol._
 import spray.json._

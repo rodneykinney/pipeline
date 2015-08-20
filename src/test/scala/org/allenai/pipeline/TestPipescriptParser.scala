@@ -1,7 +1,7 @@
-package org.allenai.pipeline.hackathon
+package org.allenai.pipeline
 
 import org.allenai.common.testkit.UnitSpec
-import org.allenai.pipeline.hackathon.PipescriptParser._
+import PipeScriptParser._
 
 class TestPipescriptParser extends UnitSpec {
   "variable resolution" should "work with curly braces" in {
@@ -19,20 +19,20 @@ class TestPipescriptParser extends UnitSpec {
   "pipeline scripting" should "successfully parse a step command" in {
     val program =
       """run python {in:"$scripts/ExtractArrows.py"} -i {in:"./png", id:"pngDir"} -o {out:"arrowDir", type:"dir"}"""
-    val parser = new PipescriptParser.Parser
+    val parser = new PipeScriptParser.Parser
     val parsed = parser.parseScript(program)
   }
 
   it should "parse a string without quotes" in {
     val program =
       """run python {in:./ExtractArrows.py} -i {in:png, id:pngDir}"""
-    val parser = new PipescriptParser.Parser
+    val parser = new PipeScriptParser.Parser
     val parsed = parser.parseScript(program)
   }
 
   it should "parse a set command" in {
     val program = """set {x: "foo"}"""
-    val parser = new PipescriptParser.Parser
+    val parser = new PipeScriptParser.Parser
     val parsed = parser.parseScript(program)
   }
 
@@ -42,7 +42,7 @@ class TestPipescriptParser extends UnitSpec {
         |run echo $x
         |run echo s"abc-$x"
       """.stripMargin
-    val script = new PipescriptCompiler().compileScript(program)
+    val script = PipeScriptCompiler.compileScript(program)
     assert(script.runCommands.map(_.scriptText).find(_.indexOf("echo foo.txt") >= 0).nonEmpty)
     assert(script.runCommands.map(_.scriptText).find(_.indexOf("echo abc-foo.txt") >= 0).nonEmpty)
   }
@@ -58,7 +58,7 @@ class TestPipescriptParser extends UnitSpec {
         |
         |run echo done""".stripMargin
 
-    val parser = new PipescriptParser.Parser
+    val parser = new PipeScriptParser.Parser
     val parsed = parser.parseScript(simpleProgram).toList
 
     assert(parsed(0) === PackageStatement(KeyValuePairs(Seq(

@@ -1,39 +1,38 @@
-package org.allenai.pipeline.hackathon
-
-import com.typesafe.config.{ ConfigValueFactory, ConfigFactory, Config }
-import scala.collection.mutable.{ Map => MMap }
+package org.allenai.pipeline
 
 import java.net.URI
 
-import org.allenai.pipeline.hackathon
-import org.allenai.pipeline.hackathon.CommandToken._
+import org.allenai.pipeline.PipeScript._
+import org.allenai.pipeline.PipeScript.CommandToken._
 
-import scala.util.parsing.combinator._
+import scala.collection.mutable.{ Map => MMap }
 
-class PipescriptCompiler() {
-  protected[this] val parser = new PipescriptParser.Parser
+/** Produces a PipeScript object from a sequence of parsed statements,
+  * with all variable references resolved
+  */
+object PipeScriptCompiler {
 
-  def compile(statements: TraversableOnce[PipescriptParser.Statement]): Pipescript = {
-    var packages = Vector.empty[hackathon.Package]
-    var stepCommands = Vector.empty[hackathon.RunCommand]
+  def compile(statements: TraversableOnce[PipeScriptParser.Statement]): PipeScript = {
+    var packages = Vector.empty[Package]
+    var stepCommands = Vector.empty[RunCommand]
 
     var environment = MMap.empty[String, String]
     statements.map(_.resolve(environment)) foreach {
       // The call to resolve above has already modified the environment
-      case PipescriptParser.SetStatement(block) =>
-      case PipescriptParser.PackageStatement(block) =>
+      case PipeScriptParser.SetStatement(block) =>
+      case PipeScriptParser.PackageStatement(block) =>
         val source = block.findGet("source")
         val id = block.findGet("id")
         val sourceUri = new URI(source)
-        packages :+= hackathon.Package(id, sourceUri)
-      case PipescriptParser.RunStatement(tokens) =>
+        packages :+= Package(id, sourceUri)
+      case PipeScriptParser.RunStatement(tokens) =>
         stepCommands :+= RunCommand(tokens.map(transformToken))
     }
 
-    def transformToken(scriptToken: PipescriptParser.Token): CommandToken = {
+    def transformToken(scriptToken: PipeScriptParser.Token): CommandToken = {
       scriptToken match {
-        case PipescriptParser.StringToken(s) => CommandToken.StringToken(s.asString)
-        case t @ PipescriptParser.KeyValuePairsToken(block) =>
+        case PipeScriptParser.StringToken(s) => CommandToken.StringToken(s.asString)
+        case t @ PipeScriptParser.KeyValuePairsToken(block) =>
           if (block.hasKey("file")) {
             block.find("package").map {
               pkgName => PackagedInput(pkgName, block.findGet("file"))
@@ -66,10 +65,10 @@ class PipescriptCompiler() {
       }
     }
 
-    Pipescript(packages, stepCommands)
+    PipeScript(packages, stepCommands)
   }
 
-  def compileScript(text: String): Pipescript = {
-    this.compile(parser.parseScript(text))
+  def compileScript(text: String): PipeScript = {
+    this.compile(new PipeScriptParser.Parser().parseScript(text))
   }
 }

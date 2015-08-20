@@ -1,20 +1,23 @@
-package org.allenai.pipeline.hackathon
-
-import org.allenai.pipeline._
-
-import scala.collection.mutable
+package org.allenai.pipeline
 
 import java.io.File
 import java.net.URI
 
-class PipescriptPipeline(val pipeline: Pipeline) {
+import org.allenai.pipeline.PipeScript._
+
+import scala.collection.mutable
+
+/** Interprets a PipeScript script and applies its workflow to a Pipeline
+  * @param pipeline
+  */
+class PipeScriptInterpreter(val pipeline: Pipeline) {
 
   def buildPipeline(scriptText: String): Pipeline = {
-    val script = new PipescriptCompiler().compileScript(scriptText)
+    val script = PipeScriptCompiler.compileScript(scriptText)
     buildPipeline(script)
   }
 
-  def buildPipeline(script: Pipescript) = {
+  def buildPipeline(script: PipeScript) = {
     val producers = mutable.Map[String, Producer[File]]()
 
     val cachedOutputArgs = mutable.Map[String, OutputArg]()
@@ -132,7 +135,7 @@ class PipescriptPipeline(val pipeline: Pipeline) {
         ReplicateFile(Right((uploaded, getName _)))
     }
 
-  def makePortable(script: Pipescript) = {
+  def makePortable(script: PipeScript) = {
     import CommandToken._
     val packages =
       for (pkg <- script.packages) yield {
@@ -150,6 +153,6 @@ class PipescriptPipeline(val pipeline: Pipeline) {
           }
         RunCommand(tokens)
       }
-    Pipescript(packages, steps)
+    PipeScript(packages, steps)
   }
 }

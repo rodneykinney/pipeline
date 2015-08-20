@@ -1,10 +1,11 @@
-package org.allenai.pipeline.hackathon
+package org.allenai.pipeline
 
-import java.io.{ File, FileInputStream, InputStream, SequenceInputStream }
+import java.io.{ SequenceInputStream, InputStream, FileInputStream, File }
 import java.util.Collections
 
+import scala.collection.JavaConverters._
+
 import org.allenai.common.Resource
-import org.allenai.pipeline._
 
 /** Replicates a file (or directory) to a shared location
   *
@@ -104,7 +105,6 @@ object InputStreamChecksum {
   }
 
   def forDirectory(dir: File) = {
-    import scala.collection.JavaConverters._
     val streams =
       for (f <- dir.listFiles.sorted) yield {
         new FileInputStream(f)

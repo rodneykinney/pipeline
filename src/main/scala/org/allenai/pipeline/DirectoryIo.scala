@@ -1,11 +1,13 @@
-package org.allenai.pipeline.hackathon
+package org.allenai.pipeline
 
 import org.allenai.common.Resource
-import org.allenai.pipeline._
 
 import scala.io.Source
 
-object KeyValueIo extends ArtifactIo[Map[String, String], StructuredArtifact] {
+/** Saves a Map[String, String] as a directory of files,
+  * where the key is the file name and the value is the file contents
+  */
+object DirectoryIo extends ArtifactIo[Map[String, String], StructuredArtifact] {
   override def write(data: Map[String, String], artifact: StructuredArtifact): Unit = {
     artifact.write { writer =>
       for ((k, v) <- data.toSeq.sortBy(_._1)) {
@@ -22,5 +24,5 @@ object KeyValueIo extends ArtifactIo[Map[String, String], StructuredArtifact] {
     }).toMap
   }
 
-  override def stepInfo: PipelineStepInfo = PipelineStepInfo("KeyValueIo")
+  override def stepInfo: PipelineStepInfo = PipelineStepInfo("SaveDirectory")
 }

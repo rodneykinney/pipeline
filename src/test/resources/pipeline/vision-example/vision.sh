@@ -1,6 +1,6 @@
-scripts=./vision-py/scripts
-pngDir=/Users/rodneykinney/Downloads/RegentsRun/regentsImagesResized
-outputDir=./vision-out
+scripts=./src/test/resources/pipeline/vision-example/scripts
+pngDir=./src/test/resources/pipeline/vision-example/png
+outputDir=./vision-example-out
 
 python $scripts/ExtractArrows.py -i $pngDir -o $outputDir/arrows
 

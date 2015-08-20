@@ -3,7 +3,7 @@ package org.allenai.pipeline
 import java.io.File
 import java.net.URI
 
-import sys.process._
+import scala.sys.process._
 
 case class ReadFromURL(url: URI, name: String = "ReadFromURL",
     dataUrl: Option[URI] = None) extends Producer[File] with Ai2StepInfo {

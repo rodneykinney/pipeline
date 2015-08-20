@@ -1,17 +1,17 @@
-package org.allenai.pipeline.hackathon
+package org.allenai.pipeline
 
 import org.apache.commons.lang3.StringEscapeUtils
 
 import scala.collection.mutable.{ Map => MMap }
 import scala.util.matching.Regex
 import scala.util.matching.Regex.Match
-import scala.util.parsing.combinator._
+import scala.util.parsing.combinator.JavaTokenParsers
 
-/** This class performs the basic parsing of the pipescript language.
+/** This class performs the basic parsing of the PipeScript language.
   * It does not enforce semantic constraints on top of the syntax.
   * PipelineCompiler handles semantic constraints and builds something that is executable.
   */
-object PipescriptParser {
+object PipeScriptParser {
 
   /** Each line in a pipescript file corresponds to a statement.
     */

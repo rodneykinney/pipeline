@@ -61,7 +61,8 @@ Variables are set with the `set` command:
 Variables can be used after they are declared by using a `$` prefix
 
     $var1                     # => value1
-    ${var1}23                 # => value123
+    ${var1}                   # => value1
+    s"${var1}23"              # => value123
     s"url=\"${var2}\""        # => url="http://www.example.com/value2"
     
 ## Packages

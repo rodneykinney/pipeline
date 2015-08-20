@@ -1,12 +1,14 @@
-package org.allenai.pipeline.hackathon
+package org.allenai.pipeline
 
 object TestData {
-  import CommandToken._
   import java.net.URI
 
-  val script = Pipescript(
+  import org.allenai.pipeline.PipeScript._
+  import org.allenai.pipeline.PipeScript.CommandToken._
+
+  val script = PipeScript(
     packages = Seq(
-      Package(id = "scripts", source = new URI("./vision-py/scripts"))
+      Package(id = "scripts", source = new URI("./vision-example/scripts"))
     ),
     runCommands = Seq(
       RunCommand(
@@ -14,7 +16,7 @@ object TestData {
           StringToken("python"),
           PackagedInput("scripts", "ExtractArrows.py"),
           StringToken("-i"),
-          InputDir(source = new URI("./vision-py/png")),
+          InputDir(source = new URI("./vision-example/png")),
           StringToken("-o"),
           OutputDir("arrowDir")
         )
@@ -24,7 +26,7 @@ object TestData {
           StringToken("python"),
           PackagedInput("scripts", "ExtractBlobs.py"),
           StringToken("-i"),
-          InputDir(source = new URI("./vision-py/png")),
+          InputDir(source = new URI("./vision-example/png")),
           StringToken("-o"),
           OutputDir("blobsDir")
         )
@@ -34,7 +36,7 @@ object TestData {
           StringToken("python"),
           PackagedInput("scripts", "ExtractText.py"),
           StringToken("-i"),
-          InputDir(source = new URI("./vision-py/png")),
+          InputDir(source = new URI("./vision-example/png")),
           StringToken("-o"),
           OutputDir("textDir")
         )

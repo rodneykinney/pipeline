@@ -1,8 +1,9 @@
 # A vision-like pipeline workflow
 
-package {id:scripts, source:vision-py/scripts}
+set { rootDir: src/test/resources/pipeline/vision-example}
+set { pngDir: s"${rootDir}/png" }
 
-set { pngDir: vision-py/png }
+package {id:scripts, source:s"${rootDir}/scripts"}
 
 # Extract arrow head/tail
 run python {file:ExtractArrows.py, package:scripts}
