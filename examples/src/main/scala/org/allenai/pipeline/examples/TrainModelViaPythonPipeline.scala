@@ -1,6 +1,5 @@
 package org.allenai.pipeline.examples
 
-import org.allenai.pipeline.ExternalProcess._
 import org.allenai.pipeline._
 
 import java.io.File
@@ -9,7 +8,7 @@ import java.io.File
   * to train a model and to score the test data
   */
 object TrainModelViaPythonPipeline extends App {
-  import ExternalProcess._
+  import org.allenai.pipeline.IoHelpers._
   val inputDir = new File("../core/src/test/resources/pipeline")
   val pipeline = Pipeline(new File("pipeline-output"))
 
@@ -18,44 +17,29 @@ object TrainModelViaPythonPipeline extends App {
 
   // Invoke an external Python process to train a model
   val trainModel =
-    RunExternalProcess(
+    RunProcess(
       "python",
-      ScriptToken(new File(inputDir, "trainModel.py").getAbsolutePath),
-      OutputFileToken("modelFile"),
+      "trainModel.py",
+      OutputFileArg("modelFile"),
       "-data",
-      InputFileToken("trainingData")
-    )(
-        Seq(
-          trainData
-        ),
-        versionHistory = Seq(
-          "v1.0"
-        )
-      )
+      trainData -> "trainingData"
+    )
 
   // Capture the output of the process and persist it
-  val modelFile = pipeline.persist(trainModel.outputs("modelFile"), StreamIo, "TrainedModel")
+  val modelFile = pipeline.persist(trainModel.outputFiles("modelFile"), UploadFile, "TrainedModel")
 
   val measureModel =
-    RunExternalProcess(
+    RunProcess(
       "python",
-      ScriptToken(new File(inputDir, "scoreModel.py").getAbsolutePath),
-      OutputFileToken("prFile"),
+      "scoreModel.py",
+      OutputFileArg("prFile"),
       "-model",
-      InputFileToken("modelFile"),
+      modelFile -> "modelFile",
       "-data",
-      InputFileToken("testDataFile")
-    )(
-        inputs = Seq(
-          modelFile,
-          testData
-        ),
-        versionHistory = Seq(
-          "v1.0"
-        )
-      )
+      testData -> "testDataFile"
+    )
 
-  pipeline.persist(measureModel.outputs("prFile"), StreamIo, "PrecisionRecall")
+  pipeline.persist(measureModel.outputFiles("prFile"), UploadFile, "PrecisionRecall")
 
   // Measure precision/recall of the model using the test data from above
   val steps = pipeline.run("Train Model Python")

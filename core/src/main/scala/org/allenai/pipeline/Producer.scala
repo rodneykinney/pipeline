@@ -9,7 +9,7 @@ import scala.concurrent.duration.Duration
   *
   * @tparam  T  the type of data being produced
   */
-trait Producer[T] extends PipelineStep with CachingEnabled with Logging {
+trait Producer[+T] extends PipelineStep with CachingEnabled with Logging {
   self =>
   /** Produces the data, if not already produced and cached. */
   protected def create: T
@@ -65,16 +65,6 @@ trait Producer[T] extends PipelineStep with CachingEnabled with Logging {
     timing = Some(duration)
     result
   }
-
-  // It doesn't really make sense for a Producer class to control how it's persisted,
-  // because it might depend on the context of a pipeline
-  // Prefer using the Pipeline.persist(...) methods instead
-  @Deprecated
-  def persisted[A <: Artifact](
-    io: Serializer[T, A] with Deserializer[T, A],
-    artifactSource: => A
-  ): PersistedProducer[T, A] =
-    new ProducerWithPersistence(this, io, artifactSource)
 
   /** Default caching policy is set by the implementing class but can be overridden dynamically.
     *
@@ -172,7 +162,12 @@ class ProducerWithPersistence[T, A <: Artifact](
         executionMode = ExecuteAndBufferStream
         logger.debug(s"$className reading type Iterator from $artifact using $io")
         io.read(artifact)
-      } else {
+      } else if (!cachingEnabled) {
+        executionMode = ExecuteAndBufferStream
+        logger.debug(s"$className reading non-cacheable data from $artifact using $io")
+        io.read(artifact)
+      }
+      else {
         result
       }
     } else {
@@ -183,6 +178,8 @@ class ProducerWithPersistence[T, A <: Artifact](
   }
 
   override def stepInfo = original.stepInfo.copy(outputLocation = Some(artifact.url))
+
+  override def cachingEnabled = original.cachingEnabled
 
   override def withCachingDisabled = {
     if (cachingEnabled) {
