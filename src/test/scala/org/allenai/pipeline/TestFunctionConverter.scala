@@ -2,7 +2,6 @@ package org.allenai.pipeline
 
 import org.allenai.common.testkit.UnitSpec
 
-import scala.collection.mutable
 import scala.util.matching.Regex
 
 class TestFunctionConverter extends UnitSpec {
@@ -200,22 +199,22 @@ class TestFunctionConverter extends UnitSpec {
   val x = """\s+""".r
 
   /** Helper method for testing whether closure cleaning works as expected. */
-  private def checkParameters(closure: AnyRef, expected: (Regex, Any)*): Unit = {
+  private def checkParameters(closure: AnyRef, expected: (String, Any)*): Unit = {
     val result = FunctionConverter.findParameters(closure)
     result.size should equal(expected.size)
-    def findMatchingParam(rex: Regex) = result.collect{case (k,v) if rex.pattern.matcher(k).matches => v}.headOption
-    for ((rex, value) <- expected) {
-      val foundValue = findMatchingParam(rex)
-      assert(foundValue.nonEmpty,s"No parameter with name matching $rex")
-      assert(foundValue.get === value, s"Expected parameter ($rex, $value) not found")
+    def findMatchingParam(rex: Regex) = result.collect { case (k, v) if rex.pattern.matcher(k).matches => v}.headOption
+    for ((name, value) <- expected) {
+      val foundValue = result.get(name)
+      assert(foundValue.nonEmpty, s"No parameter with name matching $name")
+      assert(foundValue.get === value, s"Expected parameter ($name, $value) not found")
     }
   }
 
   private def checkInvalidParameters(closure: AnyRef) = {
     an[Exception] should be thrownBy {
       checkParameters(closure)
+    }
   }
-}
 
   it should "find parameters in basic closures" in {
     val localValue = aPrimitiveValue
@@ -232,9 +231,9 @@ class TestFunctionConverter extends UnitSpec {
     checkParameters(closure1)
     checkParameters(closure2)
     checkParameters(closure3)
-    checkParameters(closure4, """.*localValue.*""".r -> localValue)
+    checkParameters(closure4, "localValue" -> localValue)
     checkParameters(closure5)
-    checkParameters(closure6, """.*localValue2.*""".r -> localValue2)
+    checkParameters(closure6, "localValue2" -> localValue2)
   }
 
   it should "detect invalid parameters in basic closures" in {
@@ -268,8 +267,8 @@ class TestFunctionConverter extends UnitSpec {
         (1 to m).map { x => x + 1} // 2 levels
     }
 
-    checkParameters(closure1, """.*\.localValue.*""".r -> aPrimitiveValue)
-    checkParameters(closure2, """.*\.localValue.*""".r -> aPrimitiveValue)
+    checkParameters(closure1, "localValue" -> aPrimitiveValue)
+    checkParameters(closure2, "localValue" -> aPrimitiveValue)
     checkInvalidParameters(closure3)
   }
 
@@ -340,11 +339,11 @@ class TestFunctionConverter extends UnitSpec {
       }
     }
 
-    checkParameters(closure1)
-    checkParameters(closure2)
+    checkParameters(closure1, "localValue" -> localValue)
+    checkParameters(closure2, "localValue" -> localValue)
   }
 
-  it should "clean complicated nested non-serializable closures" in {
+  it should "detect invalid parameters in complicated deeply nested closures" in {
     val localValue = aPrimitiveValue
 
     // Note that we are not interested in cleaning the outer closures here (they are not cleanable)
@@ -358,11 +357,13 @@ class TestFunctionConverter extends UnitSpec {
 
       // This closure explicitly references a non-serializable field
       // There is no way to clean it
-      checkParameters(inner1)
+      checkParameters(inner1,
+        "a"-> localValue,
+        "b"-> Map("a" -> 1, "b" -> 2))
 
       // This closure is serializable to begin with since it does not need a pointer to
       // the outer closure (it only references local variables)
-      checkParameters(inner2)
+      checkParameters(inner2, "a" -> localValue)
     }
 
     // Same as above, but the `val a` becomes `def a`
@@ -374,17 +375,12 @@ class TestFunctionConverter extends UnitSpec {
       val inner2 = (x: Int) => x + a
 
       // As before, this closure is neither serializable nor cleanable
-      checkParameters(inner1)
+      checkInvalidParameters(inner1)
 
       // This closure is no longer serializable because it now has a pointer to the outer closure,
       // which is itself not serializable because it has a pointer to the ClosureCleanerSuite2.
       // If we do not clean transitively, we will not null out this indirect reference.
-      checkParameters(inner2)
-
-      // If we clean transitively, we will find that method `a` does not actually reference the
-      // outer closure's parent (i.e. the ClosureCleanerSuite), so we can additionally null out
-      // the outer closure's parent pointer. This will make `inner2` serializable.
-      checkParameters(inner2)
+      checkInvalidParameters(inner2)
     }
 
     // Same as above, but with more levels of nesting
