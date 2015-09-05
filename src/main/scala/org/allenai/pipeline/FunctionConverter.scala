@@ -1,21 +1,21 @@
 package org.allenai.pipeline
 
-import scala.collection.mutable
-
-import java.io.{ InputStream, ByteArrayInputStream, ByteArrayOutputStream }
-
 import org.allenai.common.Resource
+
 import org.apache.commons.io.IOUtils
 import org.objectweb.asm.Opcodes._
-import org.objectweb.asm.{ Type, MethodVisitor, ClassReader, ClassVisitor }
+import org.objectweb.asm.{ClassReader, ClassVisitor, MethodVisitor, Type}
 
-import scala.collection.mutable.{ListBuffer, Map, Set}
+import scala.collection.mutable
+import scala.collection.mutable.{ListBuffer, Map => MMap, Set}
+
+import java.io.{ByteArrayInputStream, ByteArrayOutputStream, InputStream}
 
 object FunctionConverter {
 
   def stepInfoFor(func: AnyRef): PipelineStepInfo = {
     val classContents = getClassFileContents(func.getClass)
-    val versionId = (classContents.foldLeft(0L) { (hash, char) => hash * 31 + char }).toHexString
+    val versionId = (classContents.foldLeft(0L) { (hash, char) => hash * 31 + char}).toHexString
 
     PipelineStepInfo(
       className = func.getClass.getName,
@@ -46,12 +46,12 @@ object FunctionConverter {
     baos.toByteArray
   }
 
-  def logDebug(s: String) = ()//println(s)
+  def logDebug(s: String) = () //println(s)
 
   private def instantiateClass(
     cls: Class[_],
     enclosingObject: AnyRef
-  ): AnyRef = {
+    ): AnyRef = {
     // This is a bona fide closure class, whose constructor has no effects
     // other than to set its fields, so use its constructor
     val cons = cls.getConstructors()(0)
@@ -71,9 +71,9 @@ object FunctionConverter {
   }
 
   def findParameters(
-    func: AnyRef): collection.immutable.Map[String, Any] = {
-    val accessedFields = Map.empty[Class[_], Set[String]]
-    val params = Map.empty[String, Any]
+    func: AnyRef): Map[String, Any] = {
+    val accessedFields = MMap.empty[Class[_], Set[String]]
+    val params = MMap.empty[String, Any]
 
     if (func == null) {
       return params.toMap
@@ -92,21 +92,21 @@ object FunctionConverter {
 
     // If accessed fields is not populated yet, we assume that
     // the closure we are trying to clean is the starting one
-      logDebug(s" + populating accessed fields because this is the starting closure")
-      // Initialize accessed fields with the outer classes first
-      // This step is needed to associate the fields to the correct classes later
-      for (cls <- outerPairs.map(_._1) ++ innerClasses) {
-        accessedFields(cls) = Set[String]()
-      }
-      // Populate accessed fields by visiting all fields and methods accessed by this and
-      // all of its inner closures. If transitive cleaning is enabled, this may recursively
-      // visits methods that belong to other classes in search of transitively referenced fields.
-      for (cls <- func.getClass :: innerClasses) {
-        getClassReader(cls).accept(new FieldAccessFinder(accessedFields), 0)
-      }
+    logDebug(s" + populating accessed fields because this is the starting closure")
+    // Initialize accessed fields with the outer classes first
+    // This step is needed to associate the fields to the correct classes later
+    for (cls <- outerPairs.map(_._1) ++ innerClasses) {
+      accessedFields(cls) = Set[String]()
+    }
+    // Populate accessed fields by visiting all fields and methods accessed by this and
+    // all of its inner closures. If transitive cleaning is enabled, this may recursively
+    // visits methods that belong to other classes in search of transitively referenced fields.
+    for (cls <- func.getClass :: innerClasses) {
+      getClassReader(cls).accept(new FieldAccessFinder(accessedFields), 0)
+    }
 
     logDebug(s" + fields accessed by starting closure: " + accessedFields.size)
-    accessedFields.foreach { f => logDebug("     " + f) }
+    accessedFields.foreach { f => logDebug("     " + f)}
 
     for ((cls, obj) <- outerPairs) {
       logDebug(s" + cloning the object $obj of class ${cls.getName}")
@@ -118,15 +118,28 @@ object FunctionConverter {
         val field = cls.getDeclaredField(fieldName)
         field.setAccessible(true)
         val value = field.get(obj)
-        require(isValidParameter(value), s"Function may only reference Strings or primitives")
-        params(s"${obj}.$fieldName") = value
+        require(isValidParameter(value), s"Closure references non-primitive value: $value")
+        val nameCandidates = List(
+          fieldName.takeWhile(_ != '$'),
+          fieldName,
+          s"$obj.$fieldName")
+        nameCandidates.find(s => !params.contains(s)) match {
+          case Some(name) => params(name) = value
+          case None => sys.error(s"Multiple fields with same name: $fieldName")
+        }
       }
     }
     params.toMap
   }
 
   def isValidParameter(x: Any): Boolean = {
-    def isAnyVal[T](x: T)(implicit evidence: T <:< AnyVal = null) = evidence != null
+    def contentsValid(contents: Iterator[_]) = {
+      var valid = true
+      while (valid && contents.hasNext) {
+        valid = valid && isValidParameter(contents.next())
+      }
+      valid
+    }
     x match {
       case u: Unit => true
       case z: Boolean => true
@@ -138,6 +151,8 @@ object FunctionConverter {
       case f: Float => true
       case d: Double => true
       case s: String => true
+      case l: List[_] => contentsValid(l.iterator)
+      case m: Map[_, _] => contentsValid(m.iterator)
       case p: Product =>
         var valid = true
         val members = p.productIterator
@@ -145,7 +160,6 @@ object FunctionConverter {
           valid = valid && isValidParameter(members.next())
         }
         valid
-      case v if isAnyVal(v) => true
       case _ => false
     }
   }
@@ -156,7 +170,7 @@ object FunctionConverter {
    */
   def findAccessedFields(
     closure: AnyRef,
-    outerClasses: Seq[Class[_]]): collection.immutable.Map[Class[_], collection.immutable.Set[String]] = {
+    outerClasses: Seq[Class[_]]): Map[Class[_], collection.immutable.Set[String]] = {
     val fields = new mutable.HashMap[Class[_], mutable.Set[String]]
     outerClasses.foreach { c => fields(c) = new mutable.HashSet[String]}
     getClassReader(closure.getClass)
@@ -178,11 +192,11 @@ object FunctionConverter {
     * @param visitedMethods a set of visited methods to avoid cycles
     */
   class FieldAccessFinder(
-    fields: Map[Class[_], Set[String]],
+    fields: MMap[Class[_], Set[String]],
     specificMethod: Option[MethodIdentifier[_]] = None,
     visitedMethods: Set[MethodIdentifier[_]] = Set.empty
-  )
-      extends ClassVisitor(ASM4) {
+    )
+    extends ClassVisitor(ASM4) {
 
     override def visitMethod(
       access: Int,
@@ -190,7 +204,7 @@ object FunctionConverter {
       desc: String,
       sig: String,
       exceptions: Array[String]
-    ): MethodVisitor = {
+      ): MethodVisitor = {
 
       // If we are told to visit only a certain method and this is not the one, ignore it
       if (specificMethod.isDefined &&
@@ -218,15 +232,15 @@ object FunctionConverter {
               fields(cl) += name
             }
             // Optionally visit other methods to find fields that are transitively referenced
-              val m = MethodIdentifier(cl, name, desc)
-              if (!visitedMethods.contains(m)) {
-                // Keep track of visited methods to avoid potential infinite cycles
-                visitedMethods += m
-                FunctionConverter.getClassReader(cl).accept(
-                  new FieldAccessFinder(fields, Some(m), visitedMethods), 0
-                )
-              }
+            val m = MethodIdentifier(cl, name, desc)
+            if (!visitedMethods.contains(m)) {
+              // Keep track of visited methods to avoid potential infinite cycles
+              visitedMethods += m
+              FunctionConverter.getClassReader(cl).accept(
+                new FieldAccessFinder(fields, Some(m), visitedMethods), 0
+              )
             }
+          }
         }
       }
     }
@@ -240,7 +254,7 @@ object FunctionConverter {
         f.setAccessible(true)
         val outer = f.get(obj)
         // The outer pointer may be null if we have cleaned this closure before
-          buff ++= getOuterClassesAndObjects(outer)
+        buff ++= getOuterClassesAndObjects(outer)
       }
     }
     buff.toList
@@ -358,4 +372,5 @@ object FunctionConverter {
       }
     }
   }
+
 }
