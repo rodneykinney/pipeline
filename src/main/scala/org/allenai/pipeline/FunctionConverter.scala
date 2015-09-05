@@ -9,66 +9,7 @@ import org.objectweb.asm.{ Type, MethodVisitor, ClassReader, ClassVisitor }
 
 import scala.collection.mutable.{ Map, Set }
 
-object FunctionConverter extends App {
-
-  class HasMembers {
-    val someSerializableValue = 1
-    val someNonSerializableValue = new NonSerializable
-    def someSerializableMethod() = 1
-    def someNonSerializableMethod() = new NonSerializable
-  }
-
-  t3()
-
-  def t3() = {
-    new HasMembers {
-      val localValue = someSerializableValue
-      val closure1 = () => 1
-      val closure2 = () => localValue
-      val closure3 = () => someSerializableValue
-      val closure4 = () => someSerializableMethod()
-
-      clean(closure1)
-      clean(closure2)
-      clean(closure3)
-      clean(closure4)
-    }
-  }
-
-  def t2() = {
-    val closure1 = () => 1
-    val closure2 = () => { () => 1 }
-    val closure3 = (i: Int) => {
-      (1 to i).map { x => x + 1 }.filter { x => x > 5 }
-    }
-    val closure4 = (j: Int) => {
-      (1 to j).flatMap { x =>
-        (1 to x).flatMap { y =>
-          (1 to y).map { z => z + 1 }
-        }
-      }
-    }
-    clean(closure1)
-    clean(closure2)
-    clean(closure3)
-    clean(closure4)
-  }
-
-  def t1() = {
-    def x = (s: String) => s.size
-
-    val c = 117
-
-    def y = (s: String) => s.size + c
-
-    val mx = Map.empty[Class[_], Set[String]]
-    clean(x, true, true, mx)
-    println(mx)
-
-    val my = Map.empty[Class[_], Set[String]]
-    clean(y, true, true, my)
-    println(my)
-  }
+object FunctionConverter {
 
   def clean(func: AnyRef): Map[Class[_], Set[String]] = {
     val m = Map.empty[Class[_], Set[String]]
@@ -87,7 +28,7 @@ object FunctionConverter extends App {
     )
   }
 
-  private def getClassReader(cls: Class[_]): ClassReader = {
+  def getClassReader(cls: Class[_]): ClassReader = {
     getClassFileContents(cls) match {
       case null => new ClassReader(null: InputStream)
       case b => new ClassReader(new ByteArrayInputStream(b))
@@ -257,13 +198,8 @@ object FunctionConverter extends App {
 
   }
 
-  // Check whether a class represents a Scala closure
-  private def isClosure(cls: Class[_]): Boolean = {
-    cls.getName.contains("$anonfun$")
-  }
-
   /** Helper class to identify a method. */
-  private case class MethodIdentifier[T](cls: Class[T], name: String, desc: String)
+  case class MethodIdentifier[T](cls: Class[T], name: String, desc: String)
 
   /** Find the fields accessed by a given class.
     *
@@ -275,7 +211,7 @@ object FunctionConverter extends App {
     * @param specificMethod if not empty, visit only this specific method
     * @param visitedMethods a set of visited methods to avoid cycles
     */
-  private class FieldAccessFinder(
+  class FieldAccessFinder(
     fields: Map[Class[_], Set[String]],
     findTransitively: Boolean,
     specificMethod: Option[MethodIdentifier[_]] = None,
@@ -330,6 +266,13 @@ object FunctionConverter extends App {
     }
   }
 
+  def getOuterClassesAndObjects(obj: AnyRef): List[(Class[_], AnyRef)] = {
+    val classes = getOuterClasses(obj)
+    val objects = getOuterObjects(obj)
+    require(classes.size == objects.size,s"Error extracting outer classes [${classes}] and objects [${objects}]")
+    classes.zip(objects)
+  }
+
   // Get a list of the classes of the outer objects of a given closure object, obj;
   // the outer objects are defined as any closures that obj is nested within, plus
   // possibly the class that the outermost closure is in, if any. We stop searching
@@ -369,9 +312,15 @@ object FunctionConverter extends App {
     Nil
   }
 
+  // Check whether a class represents a Scala closure
+  def isClosure(cls: Class[_]): Boolean = {
+    cls.getName.contains("$anonfun$")
+  }
+
+
   /** Return a list of classes that represent closures enclosed in the given closure object.
     */
-  private def getInnerClosureClasses(obj: AnyRef): List[Class[_]] = {
+  def getInnerClosureClasses(obj: AnyRef): List[Class[_]] = {
     val seen = Set[Class[_]](obj.getClass)
     var stack = List[Class[_]](obj.getClass)
     while (!stack.isEmpty) {
@@ -902,4 +851,3 @@ object FunctionConverter extends App {
 //}
 //
 
-class NonSerializable
