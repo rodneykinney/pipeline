@@ -3,6 +3,7 @@ package org.allenai.pipeline
 import org.allenai.common.testkit.UnitSpec
 
 import scala.collection.mutable
+import scala.util.matching.Regex
 
 class TestFunctionConverter extends UnitSpec {
   // Some fields and methods to reference in inner closures later
@@ -119,23 +120,6 @@ class TestFunctionConverter extends UnitSpec {
     test2()
   }
 
-  /**
-   * Return the fields accessed by the given closure by class.
-   * This also optionally finds the fields transitively referenced through methods invocations.
-   */
-  private def findAccessedFields(
-    closure: AnyRef,
-    outerClasses: Seq[Class[_]],
-    findTransitively: Boolean): Map[Class[_], Set[String]] = {
-    import org.allenai.pipeline.FunctionConverter._
-    val fields = new mutable.HashMap[Class[_], mutable.Set[String]]
-    outerClasses.foreach { c => fields(c) = new mutable.HashSet[String]}
-    getClassReader(closure.getClass)
-      .accept(new FieldAccessFinder(fields, findTransitively), 0)
-    fields.mapValues(_.toSet).toMap
-  }
-
-
   it should "find accessed fields" in {
     import org.allenai.pipeline.FunctionConverter._
     val localValue = someSerializableValue
@@ -248,23 +232,19 @@ class TestFunctionConverter extends UnitSpec {
     test1()
   }
 
+  val x = """\s+""".r
+
   /** Helper method for testing whether closure cleaning works as expected. */
-  private def verifyCleaning(
-    closure: AnyRef,
-    serializableBefore: Boolean,
-    serializableAfter: Boolean,
-    transitive: Boolean): Unit = {
-    println("Not implemented")
+  private def checkParameters(closure: AnyRef, expected: (Regex, Any)*): Unit = {
+    val result = FunctionConverter.findParameters(closure)
+    result.size should equal(expected.size)
+    def findMatchingParam(rex: Regex) = result.collect{case (k,v) if rex.pattern.matcher(k).matches => v}.headOption
+    for ((rex, value) <- expected) {
+      val foundValue = findMatchingParam(rex)
+      assert(foundValue.nonEmpty,s"No parameter with name matching $rex")
+      assert(foundValue.get === value, s"Expected parameter ($rex, $value) not found")
+    }
   }
-
-  private def verifyCleaning(
-    closure: AnyRef,
-    serializableBefore: Boolean,
-    serializableAfter: Boolean): Unit = {
-    verifyCleaning(closure, serializableBefore, serializableAfter, true)
-    verifyCleaning(closure, serializableBefore, serializableAfter, false)
-  }
-
 
   it should "clean basic serializable closures" in {
     val localValue = someSerializableValue
@@ -279,11 +259,11 @@ class TestFunctionConverter extends UnitSpec {
     val closure4r = closure4()
     val closure5r = closure5()
 
-    verifyCleaning(closure1, serializableBefore = true, serializableAfter = true)
-    verifyCleaning(closure2, serializableBefore = true, serializableAfter = true)
-    verifyCleaning(closure3, serializableBefore = true, serializableAfter = true)
-    verifyCleaning(closure4, serializableBefore = true, serializableAfter = true)
-    verifyCleaning(closure5, serializableBefore = true, serializableAfter = true)
+    checkParameters(closure1)
+    checkParameters(closure2)
+    checkParameters(closure3)
+    checkParameters(closure4, """localValue.*""".r -> someSerializableValue)
+    checkParameters(closure5)
 
     // Verify that closures can still be invoked and the result still the same
     assert(closure1() === closure1r)
@@ -301,11 +281,11 @@ class TestFunctionConverter extends UnitSpec {
     val closure2 = () => someNonSerializableMethod()
 
     // These are not cleanable because they ultimately reference the ClosureCleanerSuite2
-    verifyCleaning(closure1, serializableBefore = false, serializableAfter = false)
-    verifyCleaning(closure2, serializableBefore = false, serializableAfter = false)
-    verifyCleaning(closure3, serializableBefore = false, serializableAfter = false)
-    verifyCleaning(closure4, serializableBefore = false, serializableAfter = false)
-    verifyCleaning(closure5, serializableBefore = false, serializableAfter = false)
+    checkParameters(closure1, """.*\$outer""".r -> this)
+    checkParameters(closure2, """.*\$outer""".r -> this)
+    checkParameters(closure3, """.*\$outer""".r -> this)
+    checkParameters(closure4, """.*\$outer""".r -> this)
+    checkParameters(closure5, """.*\$outer""".r -> this)
   }
 
   it should "clean basic nested serializable closures" in {
@@ -327,9 +307,9 @@ class TestFunctionConverter extends UnitSpec {
     val closure2r = closure2(2)
     val closure3r = closure3(3, 4, 5)
 
-    verifyCleaning(closure1, serializableBefore = true, serializableAfter = true)
-    verifyCleaning(closure2, serializableBefore = true, serializableAfter = true)
-    verifyCleaning(closure3, serializableBefore = true, serializableAfter = true)
+    checkParameters(closure1)
+    checkParameters(closure2)
+    checkParameters(closure3)
 
     // Verify that closures can still be invoked and the result still the same
     assert(closure1(1) === closure1r)
@@ -366,11 +346,11 @@ class TestFunctionConverter extends UnitSpec {
       }
     }
 
-    verifyCleaning(closure1, serializableBefore = false, serializableAfter = false)
-    verifyCleaning(closure2, serializableBefore = false, serializableAfter = false)
-    verifyCleaning(closure3, serializableBefore = false, serializableAfter = false)
-    verifyCleaning(closure4, serializableBefore = false, serializableAfter = false)
-    verifyCleaning(closure5, serializableBefore = false, serializableAfter = false)
+    checkParameters(closure1)
+    checkParameters(closure2)
+    checkParameters(closure3)
+    checkParameters(closure4)
+    checkParameters(closure5)
   }
 
   it should "clean complicated nested serializable closures" in {
@@ -407,8 +387,8 @@ class TestFunctionConverter extends UnitSpec {
 
     val closure1r = closure1(1)
     val closure2r = closure2(2)
-    verifyCleaning(closure1, serializableBefore = true, serializableAfter = true)
-    verifyCleaning(closure2, serializableBefore = true, serializableAfter = true)
+    checkParameters(closure1)
+    checkParameters(closure2)
     assert(closure1(1) == closure1r)
     assert(closure2(2) == closure2r)
   }
@@ -427,11 +407,11 @@ class TestFunctionConverter extends UnitSpec {
 
       // This closure explicitly references a non-serializable field
       // There is no way to clean it
-      verifyCleaning(inner1, serializableBefore = false, serializableAfter = false)
+      checkParameters(inner1)
 
       // This closure is serializable to begin with since it does not need a pointer to
       // the outer closure (it only references local variables)
-      verifyCleaning(inner2, serializableBefore = true, serializableAfter = true)
+      checkParameters(inner2)
     }
 
     // Same as above, but the `val a` becomes `def a`
@@ -443,19 +423,17 @@ class TestFunctionConverter extends UnitSpec {
       val inner2 = (x: Int) => x + a
 
       // As before, this closure is neither serializable nor cleanable
-      verifyCleaning(inner1, serializableBefore = false, serializableAfter = false)
+      checkParameters(inner1)
 
       // This closure is no longer serializable because it now has a pointer to the outer closure,
       // which is itself not serializable because it has a pointer to the ClosureCleanerSuite2.
       // If we do not clean transitively, we will not null out this indirect reference.
-      verifyCleaning(
-        inner2, serializableBefore = false, serializableAfter = false, transitive = false)
+      checkParameters(inner2)
 
       // If we clean transitively, we will find that method `a` does not actually reference the
       // outer closure's parent (i.e. the ClosureCleanerSuite), so we can additionally null out
       // the outer closure's parent pointer. This will make `inner2` serializable.
-      verifyCleaning(
-        inner2, serializableBefore = false, serializableAfter = true, transitive = true)
+      checkParameters(inner2)
     }
 
     // Same as above, but with more levels of nesting
