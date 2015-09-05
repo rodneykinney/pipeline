@@ -7,12 +7,13 @@ import scala.util.matching.Regex
 
 class TestFunctionConverter extends UnitSpec {
   // Some fields and methods to reference in inner closures later
-  private val someSerializableValue = 1
-  private val someNonSerializableValue = new NonSerializable
+  private val aPrimitiveValue = 1
+  private var mutablePrimitive = 1
+  private val aNonPrimitiveValue = new NonPrimitive
 
-  private def someSerializableMethod() = 1
+  private def methodReturningPrimitive() = 1
 
-  private def someNonSerializableMethod() = new NonSerializable
+  private def methodReturningNonPrimitive() = new NonPrimitive
 
   "FunctionConverter" should "get inner closure classes" in {
     val closure1 = () => 1
@@ -43,11 +44,11 @@ class TestFunctionConverter extends UnitSpec {
 
   it should "get outer classes and objects" in {
     import org.allenai.pipeline.FunctionConverter._
-    val localValue = someSerializableValue
+    val localValue = aPrimitiveValue
     val closure1 = () => 1
     val closure2 = () => localValue
-    val closure3 = () => someSerializableValue
-    val closure4 = () => someSerializableMethod()
+    val closure3 = () => aPrimitiveValue
+    val closure4 = () => methodReturningPrimitive()
 
     val (outerClasses1, outerObjects1) = getOuterClassesAndObjects(closure1).unzip
     val (outerClasses2, outerObjects2) = getOuterClassesAndObjects(closure2).unzip
@@ -73,7 +74,7 @@ class TestFunctionConverter extends UnitSpec {
   }
 
   it should "get outer classes and objects with nesting" in {
-    val localValue = someSerializableValue
+    val localValue = aPrimitiveValue
     import org.allenai.pipeline.FunctionConverter._
 
     val test1 = () => {
@@ -122,10 +123,10 @@ class TestFunctionConverter extends UnitSpec {
 
   it should "find accessed fields" in {
     import org.allenai.pipeline.FunctionConverter._
-    val localValue = someSerializableValue
+    val localValue = aPrimitiveValue
     val closure1 = () => 1
     val closure2 = () => localValue
-    val closure3 = () => someSerializableValue
+    val closure3 = () => aPrimitiveValue
     val (outerClasses1, _) = getOuterClassesAndObjects(closure1).unzip
     val (outerClasses2, _) = getOuterClassesAndObjects(closure2).unzip
     val (outerClasses3, _) = getOuterClassesAndObjects(closure3).unzip
@@ -149,19 +150,19 @@ class TestFunctionConverter extends UnitSpec {
     assert(fields3t(outerClasses3(1)).size === 1)
     assert(fields3t(outerClasses3(1)).head === "$outer")
     assert(fields3t(outerClasses3(2)).size === 1)
-    assert(fields3t(outerClasses3(2)).head.contains("someSerializableValue"))
+    assert(fields3t(outerClasses3(2)).head.contains("aPrimitiveValue"))
   }
 
   it should "find accessed fields with nesting" in {
     import org.allenai.pipeline.FunctionConverter._
-    val localValue = someSerializableValue
+    val localValue = aPrimitiveValue
 
     val test1 = () => {
       def a = localValue + 1
       val closure1 = () => 1
       val closure2 = () => a
       val closure3 = () => localValue
-      val closure4 = () => someSerializableValue
+      val closure4 = () => aPrimitiveValue
       val (outerClasses1, _) = getOuterClassesAndObjects(closure1).unzip
       val (outerClasses2, _) = getOuterClassesAndObjects(closure2).unzip
       val (outerClasses3, _) = getOuterClassesAndObjects(closure3).unzip
@@ -190,7 +191,7 @@ class TestFunctionConverter extends UnitSpec {
       assert(fields4t(outerClasses4(1)) === Set("$outer"))
       assert(fields4t(outerClasses4(2)) === Set("$outer"))
       assert(fields4t(outerClasses4(3)).size === 1)
-      assert(fields4t(outerClasses4(3)).head.contains("someSerializableValue"))
+      assert(fields4t(outerClasses4(3)).head.contains("aPrimitiveValue"))
     }
 
     test1()
@@ -210,38 +211,49 @@ class TestFunctionConverter extends UnitSpec {
     }
   }
 
-  it should "clean basic serializable closures" in {
-    val localValue = someSerializableValue
+  private def checkInvalidParameters(closure: AnyRef) = {
+    an[Exception] should be thrownBy {
+      checkParameters(closure)
+  }
+}
+
+  it should "find parameters in basic closures" in {
+    val localValue = aPrimitiveValue
+    mutablePrimitive = 55
+    val localValue2 = mutablePrimitive
+    mutablePrimitive = 117
     val closure1 = () => 1
     val closure2 = () => Array[String]("a", "b", "c")
     val closure3 = (s: String, arr: Array[Long]) => s + arr.mkString(", ")
     val closure4 = () => localValue
-    val closure5 = () => new NonSerializable(5) // we're just serializing the class information
+    val closure5 = () => new NonPrimitive(5) // we're just serializing the class information
+    val closure6 = () => localValue2
 
     checkParameters(closure1)
     checkParameters(closure2)
     checkParameters(closure3)
-    checkParameters(closure4, """.*localValue.*""".r -> someSerializableValue)
+    checkParameters(closure4, """.*localValue.*""".r -> localValue)
     checkParameters(closure5)
+    checkParameters(closure6, """.*localValue2.*""".r -> localValue2)
   }
 
-  it should "clean basic non-serializable closures" in {
-    val closure1 = () => this // ClosureCleanerSuite2 is not serializable
-    val closure2 = () => someNonSerializableMethod()
-    val closure3 = () => someSerializableMethod()
-    val closure4 = () => someNonSerializableValue
-    val closure5 = () => someSerializableValue
+  it should "detect invalid parameters in basic closures" in {
+    val closure1 = () => this
+    val closure2 = () => methodReturningNonPrimitive()
+    val closure3 = () => methodReturningPrimitive()
+    val closure4 = () => aNonPrimitiveValue
+    val closure5 = () => aPrimitiveValue
 
-    // These are not cleanable because they ultimately reference the ClosureCleanerSuite2
-    checkParameters(closure1, """.*\$outer""".r -> this)
-    checkParameters(closure2, """.*\$outer""".r -> this)
-    checkParameters(closure3, """.*\$outer""".r -> this)
-    checkParameters(closure4, """.*\$outer""".r -> this, """.*NonSerializable.*""".r -> someNonSerializableMethod())
-    checkParameters(closure5, """.*\$outer""".r -> this, """.*SerializableValue.*""".r -> someSerializableValue)
+    // These have invalid parameters because they ultimately refer to the test suite object
+    checkInvalidParameters(closure1)
+    checkInvalidParameters(closure2)
+    checkInvalidParameters(closure3)
+    checkInvalidParameters(closure4)
+    checkInvalidParameters(closure5)
   }
 
-  it should "clean basic nested serializable closures" in {
-    val localValue = someSerializableValue
+  it should "find parameters in nested closures" in {
+    val localValue = aPrimitiveValue
     val closure1 = (i: Int) => {
       (1 to i).map { x => x + localValue} // 1 level of nesting
     }
@@ -255,30 +267,21 @@ class TestFunctionConverter extends UnitSpec {
         (1 to l).flatMap(closure1) ++ // 3 levels
         (1 to m).map { x => x + 1} // 2 levels
     }
-    val closure1r = closure1(1)
-    val closure2r = closure2(2)
-    val closure3r = closure3(3, 4, 5)
 
-    checkParameters(closure1, """.*\.localValue.*""".r -> someSerializableValue)
-    checkParameters(closure2, """.*\.localValue.*""".r -> someSerializableValue)
-    checkParameters(closure3)
-
-    // Verify that closures can still be invoked and the result still the same
-    assert(closure1(1) === closure1r)
-    assert(closure2(2) === closure2r)
-    assert(closure3(3, 4, 5) === closure3r)
+    checkParameters(closure1, """.*\.localValue.*""".r -> aPrimitiveValue)
+    checkParameters(closure2, """.*\.localValue.*""".r -> aPrimitiveValue)
+    checkInvalidParameters(closure3)
   }
 
-  it should "clean basic nested non-serializable closures" in {
-    def localSerializableMethod(): Int = someSerializableValue
-    val localNonSerializableValue = someNonSerializableValue
-    // These closures ultimately reference the ClosureCleanerSuite2
-    // Note that even accessing `val` that is an instance variable involves a method call
+  it should "detect invalid parameters in basic nested closures" in {
+    def localSerializableMethod(): Int = aPrimitiveValue
+    val localNonSerializableValue = aNonPrimitiveValue
+    // These closures ultimately reference the test suite object
     val closure1 = (i: Int) => {
-      (1 to i).map { x => x + someSerializableValue}
+      (1 to i).map { x => x + aPrimitiveValue}
     }
     val closure2 = (j: Int) => {
-      (1 to j).map { x => x + someSerializableMethod()}
+      (1 to j).map { x => x + methodReturningPrimitive()}
     }
     val closure4 = (k: Int) => {
       (1 to k).map { x => x + localSerializableMethod()}
@@ -292,21 +295,21 @@ class TestFunctionConverter extends UnitSpec {
       (1 to m).foreach { x =>
         (1 to x).foreach { y =>
           (1 to y).foreach { z =>
-            someSerializableValue
+            aPrimitiveValue
           }
         }
       }
     }
 
-    checkParameters(closure1)
-    checkParameters(closure2)
-    checkParameters(closure3)
-    checkParameters(closure4)
-    checkParameters(closure5)
+    checkInvalidParameters(closure1)
+    checkInvalidParameters(closure2)
+    checkInvalidParameters(closure3)
+    checkInvalidParameters(closure4)
+    checkInvalidParameters(closure5)
   }
 
-  it should "clean complicated nested serializable closures" in {
-    val localValue = someSerializableValue
+  it should "find parameters in complicated nested closures" in {
+    val localValue = aPrimitiveValue
 
     // Here we assume that if the outer closure is serializable,
     // then all inner closures must also be serializable
@@ -337,16 +340,12 @@ class TestFunctionConverter extends UnitSpec {
       }
     }
 
-    val closure1r = closure1(1)
-    val closure2r = closure2(2)
     checkParameters(closure1)
     checkParameters(closure2)
-    assert(closure1(1) == closure1r)
-    assert(closure2(2) == closure2r)
   }
 
   it should "clean complicated nested non-serializable closures" in {
-    val localValue = someSerializableValue
+    val localValue = aPrimitiveValue
 
     // Note that we are not interested in cleaning the outer closures here (they are not cleanable)
     // The only reason why they exist is to nest the inner closures
@@ -404,10 +403,10 @@ class TestFunctionConverter extends UnitSpec {
 
 }
 
-class NonSerializable(val id: Int = -1) {
+class NonPrimitive(val id: Int = -1) {
   override def equals(other: Any): Boolean = {
     other match {
-      case o: NonSerializable => id == o.id
+      case o: NonPrimitive => id == o.id
       case _ => false
     }
   }

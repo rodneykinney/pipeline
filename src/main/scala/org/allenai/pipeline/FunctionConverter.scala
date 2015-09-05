@@ -95,7 +95,7 @@ object FunctionConverter {
       logDebug(s" + populating accessed fields because this is the starting closure")
       // Initialize accessed fields with the outer classes first
       // This step is needed to associate the fields to the correct classes later
-      for ((cls,_) <- outerPairs) {
+      for (cls <- outerPairs.map(_._1) ++ innerClasses) {
         accessedFields(cls) = Set[String]()
       }
       // Populate accessed fields by visiting all fields and methods accessed by this and
@@ -118,134 +118,37 @@ object FunctionConverter {
         val field = cls.getDeclaredField(fieldName)
         field.setAccessible(true)
         val value = field.get(obj)
+        require(isValidParameter(value), s"Function may only reference Strings or primitives")
         params(s"${obj}.$fieldName") = value
       }
     }
     params.toMap
   }
 
-//  private def clean(
-//    func: AnyRef,
-//    checkSerializable: Boolean,
-//    cleanTransitively: Boolean,
-//    accessedFields: Map[Class[_], Set[String]]
-//  ): Unit = {
-//
-//    if (func == null) {
-//      return
-//    }
-//
-//    logDebug(s"+++ Cleaning closure $func (${func.getClass.getName}}) +++")
-//
-//    // A list of classes that represents closures enclosed in the given one
-//    val innerClasses = getInnerClosureClasses(func)
-//
-//    // A list of enclosing objects and their respective classes, from innermost to outermost
-//    // An outer object at a given index is of type outer class at the same index
-//    val outerClasses = getOuterClasses(func)
-//    val outerObjects = getOuterObjects(func)
-//
-//    // For logging purposes only
-//    val declaredFields = func.getClass.getDeclaredFields
-//    val declaredMethods = func.getClass.getDeclaredMethods
-//
-//    logDebug(" + declared fields: " + declaredFields.size)
-//    declaredFields.foreach { f => logDebug("     " + f) }
-//    logDebug(" + declared methods: " + declaredMethods.size)
-//    declaredMethods.foreach { m => logDebug("     " + m) }
-//    logDebug(" + inner classes: " + innerClasses.size)
-//    innerClasses.foreach { c => logDebug("     " + c.getName) }
-//    logDebug(" + outer classes: " + outerClasses.size)
-//    outerClasses.foreach { c => logDebug("     " + c.getName) }
-//    logDebug(" + outer objects: " + outerObjects.size)
-//    outerObjects.foreach { o => logDebug("     " + o) }
-//
-//    // Fail fast if we detect return statements in closures
-//    getClassReader(func.getClass).accept(new ReturnStatementFinder(), 0)
-//
-//    // If accessed fields is not populated yet, we assume that
-//    // the closure we are trying to clean is the starting one
-//    if (accessedFields.isEmpty) {
-//      logDebug(s" + populating accessed fields because this is the starting closure")
-//      // Initialize accessed fields with the outer classes first
-//      // This step is needed to associate the fields to the correct classes later
-//      for (cls <- outerClasses) {
-//        accessedFields(cls) = Set[String]()
-//      }
-//      // Populate accessed fields by visiting all fields and methods accessed by this and
-//      // all of its inner closures. If transitive cleaning is enabled, this may recursively
-//      // visits methods that belong to other classes in search of transitively referenced fields.
-//      for (cls <- func.getClass :: innerClasses) {
-//        getClassReader(cls).accept(new FieldAccessFinder(accessedFields), 0)
-//      }
-//    }
-//
-//    logDebug(s" + fields accessed by starting closure: " + accessedFields.size)
-//    accessedFields.foreach { f => logDebug("     " + f) }
-//
-//    // List of outer (class, object) pairs, ordered from outermost to innermost
-//    // Note that all outer objects but the outermost one (first one in this list) must be closures
-//    var outerPairs: List[(Class[_], AnyRef)] = (outerClasses zip outerObjects).reverse
-//    var parent: AnyRef = null
-//    if (outerPairs.size > 0 && !isClosure(outerPairs.head._1)) {
-//      // The closure is ultimately nested inside a class; keep the object of that
-//      // class without cloning it since we don't want to clone the user's objects.
-//      // Note that we still need to keep around the outermost object itself because
-//      // we need it to clone its child closure later (see below).
-//      logDebug(s" + outermost object is not a closure, so do not clone it: ${outerPairs.head}")
-//      parent = outerPairs.head._2 // e.g. SparkContext
-//      outerPairs = outerPairs.tail
-//    } else if (outerPairs.size > 0) {
-//      logDebug(s" + outermost object is a closure, so we just keep it: ${outerPairs.head}")
-//    } else {
-//      logDebug(" + there are no enclosing objects!")
-//    }
-//
-//    // Clone the closure objects themselves, nulling out any fields that are not
-//    // used in the closure we're working on or any of its inner closures.
-//    for ((cls, obj) <- outerPairs) {
-//      logDebug(s" + cloning the object $obj of class ${cls.getName}")
-//      // We null out these unused references by cloning each object and then filling in all
-//      // required fields from the original object. We need the parent here because the Java
-//      // language specification requires the first constructor parameter of any closure to be
-//      // its enclosing object.
-//      val clone = instantiateClass(cls, parent)
-//      for (fieldName <- accessedFields(cls)) {
-//        val field = cls.getDeclaredField(fieldName)
-//        field.setAccessible(true)
-//        val value = field.get(obj)
-//        field.set(clone, value)
-//      }
-//      // If transitive cleaning is enabled, we recursively clean any enclosing closure using
-//      // the already populated accessed fields map of the starting closure
-//      if (cleanTransitively && isClosure(clone.getClass)) {
-//        logDebug(s" + cleaning cloned closure $clone recursively (${cls.getName})")
-//        // No need to check serializable here for the outer closures because we're
-//        // only interested in the serializability of the starting closure
-//        clean(clone, checkSerializable = false, cleanTransitively, accessedFields)
-//      }
-//      parent = clone
-//    }
-//
-//    // Update the parent pointer ($outer) of this closure
-//    if (parent != null) {
-//      val field = func.getClass.getDeclaredField("$outer")
-//      field.setAccessible(true)
-//      // If the starting closure doesn't actually need our enclosing object, then just null it out
-//      if (accessedFields.contains(func.getClass) &&
-//        !accessedFields(func.getClass).contains("$outer")) {
-//        logDebug(s" + the starting closure doesn't actually need $parent, so we null it out")
-//        field.set(func, null)
-//      } else {
-//        // Update this closure's parent pointer to point to our enclosing object,
-//        // which could either be a cloned closure or the original user object
-//        field.set(func, parent)
-//      }
-//    }
-//
-//    logDebug(s" +++ closure $func (${func.getClass.getName}) is now cleaned +++")
-//
-//  }
+  def isValidParameter(x: Any): Boolean = {
+    def isAnyVal[T](x: T)(implicit evidence: T <:< AnyVal = null) = evidence != null
+    x match {
+      case u: Unit => true
+      case z: Boolean => true
+      case b: Byte => true
+      case c: Char => true
+      case s: Short => true
+      case i: Int => true
+      case j: Long => true
+      case f: Float => true
+      case d: Double => true
+      case s: String => true
+      case p: Product =>
+        var valid = true
+        val members = p.productIterator
+        while (valid && members.hasNext) {
+          valid = valid && isValidParameter(members.next())
+        }
+        valid
+      case v if isAnyVal(v) => true
+      case _ => false
+    }
+  }
 
   /**
    * Return the fields accessed by the given closure by class.
@@ -305,6 +208,9 @@ object FunctionConverter {
         }
 
         override def visitMethodInsn(op: Int, owner: String, name: String, desc: String) {
+          if (!owner.contains("scala")) {
+            1 + 1
+          }
           for (cl <- fields.keys if cl.getName == owner.replace('/', '.')) {
             // Check for calls a getter method for a variable in an interpreter wrapper object.
             // This means that the corresponding field will be accessed, so we should save it.
