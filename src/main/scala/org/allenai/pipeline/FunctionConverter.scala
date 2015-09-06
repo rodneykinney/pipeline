@@ -11,51 +11,17 @@ import scala.collection.mutable.{ListBuffer, Map => MMap, Set => MSet}
 import scala.runtime.VolatileObjectRef
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, InputStream}
+import java.nio.charset.Charset
 
 object FunctionConverter {
 
-  def stepInfoFor(func: AnyRef): PipelineStepInfo = {
-    val classContents = getClassFileContents(func.getClass)
-    val versionId = (classContents.foldLeft(0L) { (hash, char) => hash * 31 + char}).toHexString
-
-    PipelineStepInfo(
-      className = func.getClass.getName,
-      classVersion = versionId
-    )
-  }
-
-  def getClassReader(cls: Class[_]): ClassReader = {
-    getClassFileContents(cls) match {
-      case null => new ClassReader(null: InputStream)
-      case b => new ClassReader(new ByteArrayInputStream(b))
-    }
-  }
-
-  def getClassFileContents(cls: Class[_]): Array[Byte] = {
-    // Copy data over, before delegating to ClassReader - else we can run out of open file handles.
-    val className = cls.getName.replaceFirst("^.*\\.", "") + ".class"
-    val resourceStream = cls.getResourceAsStream(className)
-    // todo: Fixme - continuing with earlier behavior ...
-    if (resourceStream == null) return null
-
-    val baos = new ByteArrayOutputStream(128)
-    Resource.using(resourceStream) { is =>
-      Resource.using(baos) { os =>
-        IOUtils.copy(is, os)
-      }
-    }
-    baos.toByteArray
-  }
-
-  def logDebug(s: String) = () //println(s)
-
-  def findParameters(
-    func: AnyRef): Map[String, Any] = {
+  def findExternalReferences(
+    func: AnyRef): FunctionDecomposition = {
     val accessedFields = MMap.empty[Class[_], MSet[String]]
     val params = MMap.empty[String, Any]
 
     if (func == null) {
-      return params.toMap
+      return FunctionDecomposition(params.toMap)
     }
 
     logDebug(s"+++ Cleaning closure $func (${func.getClass.getName}}) +++")
@@ -113,8 +79,37 @@ object FunctionConverter {
         }
       }
     }
-    params.toMap
+    FunctionDecomposition(params.toMap)
   }
+
+  def stepInfoFor(func: AnyRef): PipelineStepInfo = {
+    val classContents = getClassFileContents(func.getClass)
+    val versionId = (classContents.foldLeft(0L) { (hash, char) => hash * 31 + char}).toHexString
+
+    PipelineStepInfo(
+      className = func.getClass.getName,
+      classVersion = versionId
+    )
+  }
+
+  def getClassReader(cls: Class[_]): ClassReader =
+    new ClassReader(getClassFileContents(cls))
+
+  def getClassFileContents(cls: Class[_]): Array[Byte] = {
+    val className = cls.getName.replaceFirst("^.*\\.", "") + ".class"
+    val resourceStream = cls.getResourceAsStream(className)
+    require(resourceStream != null, s"Could not find definition for class $cls")
+
+    val byteOs = new ByteArrayOutputStream(128)
+    Resource.using(resourceStream) { is =>
+      Resource.using(byteOs) { os =>
+        IOUtils.copy(is, os)
+      }
+    }
+    byteOs.toByteArray
+  }
+
+  def logDebug(s: String) = () //println(s)
 
   def isNull(x: Any) =
   x match {
@@ -143,8 +138,9 @@ object FunctionConverter {
       case f: Float => true
       case d: Double => true
       case s: String => true
-      case l: List[_] => contentsValid(l.iterator)
-      case m: Map[_, _] => contentsValid(m.iterator)
+      case l: List[_] if l.getClass.getName.startsWith("scala") => contentsValid(l.iterator)
+      case m: Map[_, _] if m.getClass.getName.startsWith("scala") => contentsValid(m.iterator)
+      case o: Option[_] if o.getClass.getName.startsWith("scala") => contentsValid(o.iterator)
       case p: Product =>
         var valid = true
         val members = p.productIterator
@@ -365,4 +361,25 @@ object FunctionConverter {
     }
   }
 
+  def stripClassName(contents: Array[Byte]): Array[Byte] = {
+    val reader = new ClassReader(contents)
+//    reader.accept(new FieldAccessFinder(MMap.empty[Class[_], MSet[String]]), 0)
+    reader.accept(new ClassVisitor(ASM4) { }, 0)
+    val buff = new Array[Char](500)
+    val className = reader.readClass(reader.header + 2, buff)
+    val itemIndex1 = reader.readUnsignedShort(reader.header+2)
+    val cn2 = reader.readUTF8(reader.getItem(itemIndex1), buff)
+    val itemIndex2 = reader.readUnsignedShort(reader.getItem(itemIndex1))
+    val classNameLength = reader.readUnsignedShort(reader.getItem(itemIndex2))
+    val classNameStart = reader.getItem(itemIndex2) + 2
+    val classNameBytes = contents.drop(classNameStart).take(classNameLength)
+    val verifyClassName = new String(classNameBytes, Charset.forName("UTF8"))
+    contents.take(classNameStart) ++ contents.drop(classNameStart + classNameLength)
+  }
 }
+
+case class FunctionDecomposition(
+  externalReferences: Map[String, Any] = Map(),
+  implementation: Map[String, Array[Byte]] = Map()
+  )
+
