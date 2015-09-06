@@ -7,7 +7,8 @@ import org.objectweb.asm.Opcodes._
 import org.objectweb.asm.{ClassReader, ClassVisitor, MethodVisitor, Type}
 
 import scala.collection.mutable
-import scala.collection.mutable.{ListBuffer, Map => MMap, Set}
+import scala.collection.mutable.{ListBuffer, Map => MMap, Set => MSet}
+import scala.runtime.VolatileObjectRef
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, InputStream}
 
@@ -30,7 +31,7 @@ object FunctionConverter {
     }
   }
 
-  private def getClassFileContents(cls: Class[_]): Array[Byte] = {
+  def getClassFileContents(cls: Class[_]): Array[Byte] = {
     // Copy data over, before delegating to ClassReader - else we can run out of open file handles.
     val className = cls.getName.replaceFirst("^.*\\.", "") + ".class"
     val resourceStream = cls.getResourceAsStream(className)
@@ -48,31 +49,9 @@ object FunctionConverter {
 
   def logDebug(s: String) = () //println(s)
 
-  private def instantiateClass(
-    cls: Class[_],
-    enclosingObject: AnyRef
-    ): AnyRef = {
-    // This is a bona fide closure class, whose constructor has no effects
-    // other than to set its fields, so use its constructor
-    val cons = cls.getConstructors()(0)
-    val params = cons.getParameterTypes.map(createNullValue).toArray
-    if (enclosingObject != null) {
-      params(0) = enclosingObject // First param is always enclosing object
-    }
-    cons.newInstance(params: _*).asInstanceOf[AnyRef]
-  }
-
-  private def createNullValue(cls: Class[_]): AnyRef = {
-    if (cls.isPrimitive) {
-      new java.lang.Byte(0: Byte) // Should be convertible to any primitive type
-    } else {
-      null
-    }
-  }
-
   def findParameters(
     func: AnyRef): Map[String, Any] = {
-    val accessedFields = MMap.empty[Class[_], Set[String]]
+    val accessedFields = MMap.empty[Class[_], MSet[String]]
     val params = MMap.empty[String, Any]
 
     if (func == null) {
@@ -89,6 +68,8 @@ object FunctionConverter {
 
     // List of outer (class, object) pairs, ordered from outermost to innermost
     var outerPairs: List[(Class[_], AnyRef)] = getOuterClassesAndObjects(func)
+    val outerClosureObjects: Set[AnyRef] =
+      outerPairs.filter(t => isClosure(t._1)).map(_._2).toSet
 
     // If accessed fields is not populated yet, we assume that
     // the closure we are trying to clean is the starting one
@@ -96,7 +77,7 @@ object FunctionConverter {
     // Initialize accessed fields with the outer classes first
     // This step is needed to associate the fields to the correct classes later
     for (cls <- outerPairs.map(_._1) ++ innerClasses) {
-      accessedFields(cls) = Set[String]()
+      accessedFields(cls) = MSet[String]()
     }
     // Populate accessed fields by visiting all fields and methods accessed by this and
     // all of its inner closures. If transitive cleaning is enabled, this may recursively
@@ -118,18 +99,29 @@ object FunctionConverter {
         val field = cls.getDeclaredField(fieldName)
         field.setAccessible(true)
         val value = field.get(obj)
-        require(isValidParameter(value), s"Closure references non-primitive value: $value")
-        val nameCandidates = List(
-          fieldName.takeWhile(_ != '$'),
-          fieldName,
-          s"$obj.$fieldName")
-        nameCandidates.find(s => !params.contains(s)) match {
-          case Some(name) => params(name) = value
-          case None => sys.error(s"Multiple fields with same name: $fieldName")
+        if (!isNull(value) && outerClosureObjects.find(_ eq value).isEmpty) {
+          require(isValidParameter(value),
+            s"Field '$fieldName' of object [$obj] is not a primitive. Value is [$value]")
+          val nameCandidates = List(
+            fieldName.takeWhile(_ != '$'),
+            fieldName,
+            s"$obj.$fieldName")
+          nameCandidates.find(s => !params.contains(s)) match {
+            case Some(name) => params(name) = value
+            case None => sys.error(s"Multiple fields with same name: $fieldName")
+          }
         }
       }
     }
     params.toMap
+  }
+
+  def isNull(x: Any) =
+  x match {
+    case ref: VolatileObjectRef[_] =>
+      ref.toString == "null"
+    case null => true
+    case _ => false
   }
 
   def isValidParameter(x: Any): Boolean = {
@@ -160,7 +152,7 @@ object FunctionConverter {
           valid = valid && isValidParameter(members.next())
         }
         valid
-      case _ => false
+      case x => !isNull(x)
     }
   }
 
@@ -170,8 +162,8 @@ object FunctionConverter {
    */
   def findAccessedFields(
     closure: AnyRef,
-    outerClasses: Seq[Class[_]]): Map[Class[_], collection.immutable.Set[String]] = {
-    val fields = new mutable.HashMap[Class[_], mutable.Set[String]]
+    outerClasses: Seq[Class[_]]): Map[Class[_], Set[String]] = {
+    val fields = new mutable.HashMap[Class[_], MSet[String]]
     outerClasses.foreach { c => fields(c) = new mutable.HashSet[String]}
     getClassReader(closure.getClass)
       .accept(new FieldAccessFinder(fields), 0)
@@ -192,9 +184,9 @@ object FunctionConverter {
     * @param visitedMethods a set of visited methods to avoid cycles
     */
   class FieldAccessFinder(
-    fields: MMap[Class[_], Set[String]],
+    fields: MMap[Class[_], MSet[String]],
     specificMethod: Option[MethodIdentifier[_]] = None,
-    visitedMethods: Set[MethodIdentifier[_]] = Set.empty
+    visitedMethods: MSet[MethodIdentifier[_]] = MSet.empty
     )
     extends ClassVisitor(ASM4) {
 
@@ -308,12 +300,12 @@ object FunctionConverter {
   /** Return a list of classes that represent closures enclosed in the given closure object.
     */
   def getInnerClosureClasses(obj: AnyRef): List[Class[_]] = {
-    val seen = Set[Class[_]](obj.getClass)
+    val seen = MSet[Class[_]](obj.getClass)
     var stack = List[Class[_]](obj.getClass)
     while (!stack.isEmpty) {
       val cr = getClassReader(stack.head)
       stack = stack.tail
-      val set = Set[Class[_]]()
+      val set = MSet[Class[_]]()
       cr.accept(new InnerClosureFinder(set), 0)
       for (cls <- set -- seen) {
         seen += cls
@@ -340,7 +332,7 @@ object FunctionConverter {
     }
   }
 
-  private class InnerClosureFinder(output: Set[Class[_]]) extends ClassVisitor(ASM4) {
+  private class InnerClosureFinder(output: MSet[Class[_]]) extends ClassVisitor(ASM4) {
     var myName: String = null
 
     // TODO: Recursively find inner closures that we indirectly reference, e.g.

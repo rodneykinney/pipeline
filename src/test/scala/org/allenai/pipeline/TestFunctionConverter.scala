@@ -196,8 +196,6 @@ class TestFunctionConverter extends UnitSpec {
     test1()
   }
 
-  val x = """\s+""".r
-
   /** Helper method for testing whether closure cleaning works as expected. */
   private def checkParameters(closure: AnyRef, expected: (String, Any)*): Unit = {
     val result = FunctionConverter.findParameters(closure)
@@ -267,9 +265,53 @@ class TestFunctionConverter extends UnitSpec {
         (1 to m).map { x => x + 1} // 2 levels
     }
 
-    checkParameters(closure1, "localValue" -> aPrimitiveValue)
-    checkParameters(closure2, "localValue" -> aPrimitiveValue)
+    val expected = "localValue" -> aPrimitiveValue
+    checkParameters(closure1, expected)
+    checkParameters(closure2, expected)
     checkInvalidParameters(closure3)
+  }
+
+  it should "find parameters in classes" in {
+    val localValue = aPrimitiveValue
+    object ObjectWithMethod {
+      def apply(i: Int) = i + localValue
+    }
+
+    val expected = "localValue" -> aPrimitiveValue
+
+    checkParameters(ObjectWithMethod.apply _, expected)
+    var asVal: (Int => Int) = ObjectWithMethod.apply
+    checkParameters(asVal, expected)
+    val asAnonFunc = (x: Int) => ObjectWithMethod.apply(x)
+    checkParameters(asAnonFunc, expected)
+    def asDef(x: Int) = ObjectWithMethod(x)
+    checkParameters(asDef _, expected)
+
+    object ObjectExtendingFunction extends (Int => Int) {
+      def apply(i: Int) = i + localValue
+    }
+    checkParameters(ObjectExtendingFunction, expected)
+
+    object ObjectWithUsedMember {
+      val x = 55
+
+      def apply(i: Int) = i + localValue + x
+    }
+    checkParameters(ObjectWithUsedMember.apply _, expected)
+
+    object ObjectWithUnusedMember {
+      val x = 55
+
+      def apply(i: Int) = i + localValue
+    }
+    checkParameters(ObjectWithUnusedMember.apply _, expected)
+
+    def curried(delta: Int)(x: Int, y: Int) = math.max(x, y) + delta
+    checkParameters(curried(55) _)
+    checkParameters(curried(55) _)
+
+    def classBytes(func: AnyRef) = FunctionConverter.getClassFileContents(func.getClass)
+    def versionId(obj: AnyRef) = (classBytes(obj).foldLeft(0L) { (hash, char) => hash * 31 + char}).toHexString
   }
 
   it should "detect invalid parameters in basic nested closures" in {
@@ -358,8 +400,8 @@ class TestFunctionConverter extends UnitSpec {
       // This closure explicitly references a non-serializable field
       // There is no way to clean it
       checkParameters(inner1,
-        "a"-> localValue,
-        "b"-> Map("a" -> 1, "b" -> 2))
+        "a" -> localValue,
+        "b" -> Map("a" -> 1, "b" -> 2))
 
       // This closure is serializable to begin with since it does not need a pointer to
       // the outer closure (it only references local variables)
@@ -407,3 +449,16 @@ class NonPrimitive(val id: Int = -1) {
     }
   }
 }
+
+object ObjectWithMethod {
+  //  def apply(i: Int) = i + localValue
+}
+
+object Function extends (Int => Int) {
+  def apply(i: Int) = i + 55
+}
+
+object ObjectWithMember {
+  val x = 55
+}
+
