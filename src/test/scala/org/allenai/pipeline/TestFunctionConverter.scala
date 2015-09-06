@@ -2,6 +2,8 @@ package org.allenai.pipeline
 
 import org.allenai.common.testkit.UnitSpec
 
+import org.objectweb.asm.ClassReader
+
 import scala.util.matching.Regex
 
 class TestFunctionConverter extends UnitSpec {
@@ -198,7 +200,7 @@ class TestFunctionConverter extends UnitSpec {
 
   /** Helper method for testing whether closure cleaning works as expected. */
   private def checkParameters(closure: AnyRef, expected: (String, Any)*): Unit = {
-    val result = FunctionConverter.findParameters(closure)
+    val FunctionDecomposition(result, _) = FunctionConverter.findExternalReferences(closure)
     result.size should equal(expected.size)
     def findMatchingParam(rex: Regex) = result.collect { case (k, v) if rex.pattern.matcher(k).matches => v}.headOption
     for ((name, value) <- expected) {
@@ -437,6 +439,16 @@ class TestFunctionConverter extends UnitSpec {
     test4()()
     test5()()()
     test6()()()
+  }
+
+  it should "find implementation definition" in {
+    import FunctionConverter._
+    val closure1 = () => 55
+    val closure2 = () => 55
+    val contents1 = stripClassName(getClassFileContents(closure1.getClass))
+    val contents2 = stripClassName(getClassFileContents(closure2.getClass))
+
+    contents1 should equal(contents2)
   }
 
 }
