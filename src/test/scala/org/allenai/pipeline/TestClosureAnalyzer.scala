@@ -7,6 +7,8 @@ import org.objectweb.asm.ClassReader
 import scala.util.matching.Regex
 
 class TestClosureAnalyzer extends UnitSpec {
+  import org.allenai.pipeline.ClosureAnalyzer._
+
   // Some fields and methods to reference in inner closures later
   private val aPrimitiveValue = 1
   private var mutablePrimitive = 1
@@ -16,7 +18,7 @@ class TestClosureAnalyzer extends UnitSpec {
 
   private def methodReturningNonPrimitive() = new NonPrimitive
 
-  "FunctionConverter" should "get inner closure classes" in {
+  "ClosureAnalyzer" should "get inner closure classes" in {
     val closure1 = () => 1
     val closure2 = () => { () => 1}
     val closure3 = (i: Int) => {
@@ -29,7 +31,6 @@ class TestClosureAnalyzer extends UnitSpec {
         }
       }
     }
-    import org.allenai.pipeline.ClosureAnalyzer._
     val inner1 = getInnerClosureClasses(closure1)
     val inner2 = getInnerClosureClasses(closure2)
     val inner3 = getInnerClosureClasses(closure3)
@@ -44,7 +45,6 @@ class TestClosureAnalyzer extends UnitSpec {
   }
 
   it should "get outer classes and objects" in {
-    import org.allenai.pipeline.ClosureAnalyzer._
     val localValue = aPrimitiveValue
     val closure1 = () => 1
     val closure2 = () => localValue
@@ -68,11 +68,11 @@ class TestClosureAnalyzer extends UnitSpec {
     assert(isClosure(outerClasses3(0)))
     assert(isClosure(outerClasses4(0)))
     assert(outerClasses3(1) === outerClasses4(1)) // part of the same "FunSuite#test" scope
+    outerObjects3(1) should equal(outerObjects4(1))
   }
 
   it should "get outer classes and objects with nesting" in {
     val localValue = aPrimitiveValue
-    import org.allenai.pipeline.ClosureAnalyzer._
 
     val test1 = () => {
       val x = 1
@@ -113,18 +113,10 @@ class TestClosureAnalyzer extends UnitSpec {
   }
 
   it should "find accessed fields" in {
-    import org.allenai.pipeline.ClosureAnalyzer._
     val localValue = aPrimitiveValue
     val closure1 = () => 1
     val closure2 = () => localValue
     val closure3 = () => aPrimitiveValue
-//    val (outerClasses1, _) = getOuterClassesAndObjects(closure1).unzip
-//    val (outerClasses2, _) = getOuterClassesAndObjects(closure2).unzip
-//    val (outerClasses3, _) = getOuterClassesAndObjects(closure3).unzip
-
-//    val fields1t = findAccessedFields(closure1, outerClasses1)
-//    val fields2t = findAccessedFields(closure2, outerClasses2)
-//    val fields3t = findAccessedFields(closure3, outerClasses3)
 
     val (fields1t, outerClasses1) = fieldsAndClasses(closure1)
     val (fields2t, outerClasses2) = fieldsAndClasses(closure2)
@@ -152,7 +144,6 @@ class TestClosureAnalyzer extends UnitSpec {
   }
 
   it should "find accessed fields with nesting" in {
-    import org.allenai.pipeline.ClosureAnalyzer._
     val localValue = aPrimitiveValue
 
     val test1 = () => {
@@ -161,10 +152,6 @@ class TestClosureAnalyzer extends UnitSpec {
       val closure2 = () => a
       val closure3 = () => localValue
       val closure4 = () => aPrimitiveValue
-//      val (outerClasses1, _) = getOuterClassesAndObjects(closure1).unzip
-//      val (outerClasses2, _) = getOuterClassesAndObjects(closure2).unzip
-//      val (outerClasses3, _) = getOuterClassesAndObjects(closure3).unzip
-//      val (outerClasses4, _) = getOuterClassesAndObjects(closure4).unzip
 
       // Now do the same, but find fields that the closures transitively reference
       val (fields1t, outerClasses1) = fieldsAndClasses(closure1)
@@ -191,7 +178,7 @@ class TestClosureAnalyzer extends UnitSpec {
 
   /** Helper method for testing whether closure cleaning works as expected. */
   private def checkParameters(closure: AnyRef, expected: (String, Any)*): Unit = {
-    val result = ClosureAnalyzer.findExternalReferences(closure)
+    val result = new ClosureAnalyzer(closure).parameters
     result.size should equal(expected.size)
     def findMatchingParam(rex: Regex) = result.collect { case (k, v) if rex.pattern.matcher(k).matches => v}.headOption
     for ((name, value) <- expected) {
@@ -201,10 +188,8 @@ class TestClosureAnalyzer extends UnitSpec {
     }
   }
 
-  private def checkInvalidParameters(closure: AnyRef) = {
-    an[Exception] should be thrownBy {
-      checkParameters(closure)
-    }
+  private def checkNonPrimitiveRefs(closure: AnyRef, expected: AnyRef*) = {
+    new ClosureAnalyzer(closure).externalNonPrimitivesReferenced.map(_._2).toSet should equal(expected.toSet)
   }
 
   it should "find parameters in basic closures" in {
@@ -235,11 +220,11 @@ class TestClosureAnalyzer extends UnitSpec {
     val closure5 = () => aPrimitiveValue
 
     // These have invalid parameters because they ultimately refer to the test suite object
-    checkInvalidParameters(closure1)
-    checkInvalidParameters(closure2)
-    checkInvalidParameters(closure3)
-    checkInvalidParameters(closure4)
-    checkInvalidParameters(closure5)
+    checkNonPrimitiveRefs(closure1, this)
+    checkNonPrimitiveRefs(closure2, this)
+    checkNonPrimitiveRefs(closure3, this)
+    checkNonPrimitiveRefs(closure4, this)
+    checkNonPrimitiveRefs(closure5, this)
   }
 
   it should "find parameters in nested closures" in {
@@ -261,7 +246,7 @@ class TestClosureAnalyzer extends UnitSpec {
     val expected = "localValue" -> aPrimitiveValue
     checkParameters(closure1, expected)
     checkParameters(closure2, expected)
-    checkInvalidParameters(closure3)
+    checkNonPrimitiveRefs(closure3, closure1, closure2)
   }
 
   it should "find parameters in inner classes" in {
@@ -303,8 +288,9 @@ class TestClosureAnalyzer extends UnitSpec {
     checkParameters(curried(55) _)
     checkParameters(curried(55) _)
 
-    val instanceMethod = new NonPrimitive(55).equals _
-    checkInvalidParameters(instanceMethod)
+    val np = new NonPrimitive(55)
+    val instanceMethod = np.equals _
+    checkNonPrimitiveRefs(instanceMethod, np)
 
   }
 
@@ -343,11 +329,11 @@ class TestClosureAnalyzer extends UnitSpec {
       }
     }
 
-    checkInvalidParameters(closure1)
-    checkInvalidParameters(closure2)
-    checkInvalidParameters(closure3)
-    checkInvalidParameters(closure4)
-    checkInvalidParameters(closure5)
+    checkNonPrimitiveRefs(closure1, this)
+    checkNonPrimitiveRefs(closure2, this)
+    checkNonPrimitiveRefs(closure3, localNonSerializableValue)
+    checkNonPrimitiveRefs(closure4, this)
+    checkNonPrimitiveRefs(closure5, this)
   }
 
   it should "find parameters in complicated nested closures" in {
@@ -427,12 +413,12 @@ class TestClosureAnalyzer extends UnitSpec {
       val inner2 = (x: Int) => x + a
 
       // As before, this closure is neither serializable nor cleanable
-      checkInvalidParameters(inner1)
+      checkNonPrimitiveRefs(inner1)
 
       // This closure is no longer serializable because it now has a pointer to the outer closure,
       // which is itself not serializable because it has a pointer to the ClosureCleanerSuite2.
       // If we do not clean transitively, we will not null out this indirect reference.
-      checkInvalidParameters(inner2)
+      checkNonPrimitiveRefs(inner2)
     }
 
     // Same as above, but with more levels of nesting
@@ -450,7 +436,6 @@ class TestClosureAnalyzer extends UnitSpec {
   }
 
   it should "find implementation definition" in {
-    import ClosureAnalyzer._
     val closure1 = Return55
     val closure2 = Return55
     val contents1 = getClassFileContents(closure1.getClass)

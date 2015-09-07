@@ -36,7 +36,7 @@ object ClosureAnalyzer {
   def isNull(x: Any) =
     x match {
       case ref: VolatileObjectRef[_] =>
-        ref.toString == "null"
+        ref.elem == null
       case null => true
       case _ => false
     }
@@ -242,11 +242,6 @@ object ClosureAnalyzer {
     val verifyClassName = new String(classNameBytes, Charset.forName("UTF8"))
     contents.take(classNameStart) ++ contents.drop(classNameStart + classNameLength)
   }
-
-  def findExternalReferences(obj: AnyRef) = {
-    val deps = new ClosureAnalyzer(obj)
-    deps.parameters
-  }
 }
 
 class ClosureAnalyzer(obj: AnyRef) {
@@ -302,13 +297,13 @@ class ClosureAnalyzer(obj: AnyRef) {
       .filter { case ((cls, fieldName), value) => isExternalRef(value)}
       .partition { case ((cls, fieldName), value) => isPrimitive(value)}
   val parameters = {
-    if (externalNonPrimitivesReferenced.nonEmpty) {
-      val badReferences =
-        (for (((cls, fieldName), value) <- externalNonPrimitivesReferenced) yield {
-          s"$fieldName='$value'"
-        }).mkString("; ")
-      sys.error(s"Closure $obj[${obj.getClass.getName}}] references non-primitive values: $badReferences")
-    }
+//    if (externalNonPrimitivesReferenced.nonEmpty) {
+//      val badReferences =
+//        (for (((cls, fieldName), value) <- externalNonPrimitivesReferenced) yield {
+//          s"$fieldName='$value'"
+//        }).mkString("; ")
+//      sys.error(s"Closure $obj[${obj.getClass.getName}}] references non-primitive values: $badReferences")
+//    }
     val params = MMap.empty[String, Any]
     for (((cls, fieldName), value) <- externalPrimitivesReferenced) {
       val name = fieldName.takeWhile(_ != '$')
