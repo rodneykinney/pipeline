@@ -6,7 +6,7 @@ import org.objectweb.asm.ClassReader
 
 import scala.util.matching.Regex
 
-class TestFunctionConverter extends UnitSpec {
+class TestClosureAnalyzer extends UnitSpec {
   // Some fields and methods to reference in inner closures later
   private val aPrimitiveValue = 1
   private var mutablePrimitive = 1
@@ -29,7 +29,7 @@ class TestFunctionConverter extends UnitSpec {
         }
       }
     }
-    import org.allenai.pipeline.FunctionConverter._
+    import org.allenai.pipeline.ClosureAnalyzer._
     val inner1 = getInnerClosureClasses(closure1)
     val inner2 = getInnerClosureClasses(closure2)
     val inner3 = getInnerClosureClasses(closure3)
@@ -44,7 +44,7 @@ class TestFunctionConverter extends UnitSpec {
   }
 
   it should "get outer classes and objects" in {
-    import org.allenai.pipeline.FunctionConverter._
+    import org.allenai.pipeline.ClosureAnalyzer._
     val localValue = aPrimitiveValue
     val closure1 = () => 1
     val closure2 = () => localValue
@@ -72,7 +72,7 @@ class TestFunctionConverter extends UnitSpec {
 
   it should "get outer classes and objects with nesting" in {
     val localValue = aPrimitiveValue
-    import org.allenai.pipeline.FunctionConverter._
+    import org.allenai.pipeline.ClosureAnalyzer._
 
     val test1 = () => {
       val x = 1
@@ -113,7 +113,7 @@ class TestFunctionConverter extends UnitSpec {
   }
 
   it should "find accessed fields" in {
-    import org.allenai.pipeline.FunctionConverter._
+    import org.allenai.pipeline.ClosureAnalyzer._
     val localValue = aPrimitiveValue
     val closure1 = () => 1
     val closure2 = () => localValue
@@ -147,12 +147,12 @@ class TestFunctionConverter extends UnitSpec {
   }
 
   def fieldsAndClasses(closure1: AnyRef) = {
-    val deps = new ObjectDependencies(closure1)
-    (deps.fieldsReferenced, deps.outerClassesAndObjects.map(_._1))
+    val deps = new ClosureAnalyzer(closure1)
+    (deps.fieldsReferenced, deps.outerClosureClasses)
   }
 
   it should "find accessed fields with nesting" in {
-    import org.allenai.pipeline.FunctionConverter._
+    import org.allenai.pipeline.ClosureAnalyzer._
     val localValue = aPrimitiveValue
 
     val test1 = () => {
@@ -191,7 +191,7 @@ class TestFunctionConverter extends UnitSpec {
 
   /** Helper method for testing whether closure cleaning works as expected. */
   private def checkParameters(closure: AnyRef, expected: (String, Any)*): Unit = {
-    val result = FunctionConverter.findExternalReferences(closure)
+    val result = ClosureAnalyzer.findExternalReferences(closure)
     result.size should equal(expected.size)
     def findMatchingParam(rex: Regex) = result.collect { case (k, v) if rex.pattern.matcher(k).matches => v}.headOption
     for ((name, value) <- expected) {
@@ -385,8 +385,8 @@ class TestFunctionConverter extends UnitSpec {
     checkParameters(closure1, "localValue" -> localValue)
     checkParameters(closure2, "localValue" -> localValue)
 
-    val f1 = new ObjectDependencies(closure1)
-    val f2 = new ObjectDependencies(closure2)
+    val f1 = new ClosureAnalyzer(closure1)
+    val f2 = new ClosureAnalyzer(closure2)
     f2 should not be null
 
   }
@@ -413,8 +413,8 @@ class TestFunctionConverter extends UnitSpec {
       // the outer closure (it only references local variables)
       checkParameters(inner2, "a" -> localValue)
 
-      val f1 = new ObjectDependencies(inner1)
-      val f2 = new ObjectDependencies(inner2)
+      val f1 = new ClosureAnalyzer(inner1)
+      val f2 = new ClosureAnalyzer(inner2)
       f2 should not be null
     }
 
@@ -450,7 +450,7 @@ class TestFunctionConverter extends UnitSpec {
   }
 
   it should "find implementation definition" in {
-    import FunctionConverter._
+    import ClosureAnalyzer._
     val closure1 = Return55
     val closure2 = Return55
     val contents1 = getClassFileContents(closure1.getClass)
@@ -468,7 +468,7 @@ class TestFunctionConverter extends UnitSpec {
 
     getClassFileContents(closure5.getClass) should equal(getClassFileContents(closure6.getClass))
 
-    val x = new ObjectDependencies(closure1)
+    val x = new ClosureAnalyzer(closure3)
     x should not be null
   }
 
