@@ -273,7 +273,7 @@ class TestFunctionConverter extends UnitSpec {
     checkInvalidParameters(closure3)
   }
 
-  it should "find parameters in classes" in {
+  it should "find parameters in inner classes" in {
     val localValue = aPrimitiveValue
     object ObjectWithMethod {
       def apply(i: Int) = i + localValue
@@ -312,8 +312,16 @@ class TestFunctionConverter extends UnitSpec {
     checkParameters(curried(55) _)
     checkParameters(curried(55) _)
 
-    def classBytes(func: AnyRef) = FunctionConverter.getClassFileContents(func.getClass)
-    def versionId(obj: AnyRef) = (classBytes(obj).foldLeft(0L) { (hash, char) => hash * 31 + char}).toHexString
+    val instanceMethod = new NonPrimitive(55).equals _
+    checkInvalidParameters(instanceMethod)
+
+  }
+
+  it should "find parameters in classes" in {
+    val closure1 = ObjectWithMethod.apply _
+
+    checkParameters(closure1)
+
   }
 
   it should "detect invalid parameters in basic nested closures" in {
@@ -385,6 +393,11 @@ class TestFunctionConverter extends UnitSpec {
 
     checkParameters(closure1, "localValue" -> localValue)
     checkParameters(closure2, "localValue" -> localValue)
+
+    val f1 = FunctionConverter.findUsedFields(closure1)
+    val f2 = FunctionConverter.findUsedFields(closure2)
+    f2 should not be null
+
   }
 
   it should "detect invalid parameters in complicated deeply nested closures" in {
@@ -408,6 +421,10 @@ class TestFunctionConverter extends UnitSpec {
       // This closure is serializable to begin with since it does not need a pointer to
       // the outer closure (it only references local variables)
       checkParameters(inner2, "a" -> localValue)
+
+      val f1 = FunctionConverter.findUsedFields(inner1)
+      val f2 = FunctionConverter.findUsedFields(inner2)
+      f2 should not be null
     }
 
     // Same as above, but the `val a` becomes `def a`
@@ -443,14 +460,31 @@ class TestFunctionConverter extends UnitSpec {
 
   it should "find implementation definition" in {
     import FunctionConverter._
-    val closure1 = () => 55
-    val closure2 = () => 55
-    val contents1 = stripClassName(getClassFileContents(closure1.getClass))
-    val contents2 = stripClassName(getClassFileContents(closure2.getClass))
+    val closure1 = Return55
+    val closure2 = Return55
+    val contents1 = getClassFileContents(closure1.getClass)
+    val contents2 = getClassFileContents(closure2.getClass)
 
     contents1 should equal(contents2)
+
+    val closure3: Int => Int = ObjectWithMethod.apply
+    val closure4: Int => Int = ObjectWithMethod.apply
+
+    stripClassName(getClassFileContents(closure3.getClass)) should not equal(stripClassName(getClassFileContents(closure4.getClass)))
+
+    val closure5: Int => Int = ObjectWithMethodAndVal.applyAsVal
+    val closure6: Int => Int = ObjectWithMethodAndVal.applyAsVal
+
+    getClassFileContents(closure5.getClass) should equal(getClassFileContents(closure6.getClass))
+
+    val x = findUsedFields(closure1)
+    x should not be null
   }
 
+}
+
+object Return55 extends (() => Int) {
+  def apply() = 55
 }
 
 class NonPrimitive(val id: Int = -1) {
@@ -460,13 +494,19 @@ class NonPrimitive(val id: Int = -1) {
       case _ => false
     }
   }
+  override def hashCode = id
 }
 
 object ObjectWithMethod {
-  //  def apply(i: Int) = i + localValue
+    def apply(i: Int) = i + 55
 }
 
-object Function extends (Int => Int) {
+object ObjectWithMethodAndVal {
+  val applyAsVal = apply _
+  def apply(i: Int) = i + 55
+}
+
+object ObjectExtendsFunction extends (Int => Int) {
   def apply(i: Int) = i + 55
 }
 
