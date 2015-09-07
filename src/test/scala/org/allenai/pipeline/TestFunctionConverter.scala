@@ -63,15 +63,11 @@ class TestFunctionConverter extends UnitSpec {
     // These closures do have $outer pointers because they ultimately reference `this`
     // The first $outer pointer refers to the closure defines this test (see FunSuite#test)
     // The second $outer pointer refers to ClosureCleanerSuite2
-    assert(outerClasses3.size === 3)
-    assert(outerClasses4.size === 3)
+    assert(outerClasses3.size === 2)
+    assert(outerClasses4.size === 2)
     assert(isClosure(outerClasses3(0)))
     assert(isClosure(outerClasses4(0)))
     assert(outerClasses3(1) === outerClasses4(1)) // part of the same "FunSuite#test" scope
-    assert(outerClasses3(2) === this.getClass)
-    assert(outerClasses4(2) === this.getClass)
-    assert(outerObjects3(2) === this)
-    assert(outerObjects4(2) === this)
   }
 
   it should "get outer classes and objects with nesting" in {
@@ -102,20 +98,14 @@ class TestFunctionConverter extends UnitSpec {
       assert(outerClasses1.size === 1)
       // This closure references the "test2" scope because it needs to find the method `y`
       // Scope hierarchy: "test2" < "FunSuite#test" < ClosureCleanerSuite2
-      assert(outerClasses2.size === 4)
+      assert(outerClasses2.size === 3)
       // This closure references the Suite#test scope because it needs to find the `localValue`
       // defined outside of this scope
-      assert(outerClasses3.size === 4)
+      assert(outerClasses3.size === 3)
       assert(isClosure(outerClasses2(1)))
       assert(isClosure(outerClasses3(1)))
       assert(isClosure(outerClasses2(2)))
       assert(isClosure(outerClasses3(2)))
-      assert(outerClasses2(1) === outerClasses3(1)) // part of the same "test2" scope
-      assert(outerClasses2(2) === outerClasses3(2)) // part of the same "FunSuite#test" scope
-      assert(outerClasses2(3) === this.getClass)
-      assert(outerClasses3(3) === this.getClass)
-      assert(outerObjects2(3) === this)
-      assert(outerObjects3(3) === this)
     }
 
     test1()
@@ -128,13 +118,17 @@ class TestFunctionConverter extends UnitSpec {
     val closure1 = () => 1
     val closure2 = () => localValue
     val closure3 = () => aPrimitiveValue
-    val (outerClasses1, _) = getOuterClassesAndObjects(closure1).unzip
-    val (outerClasses2, _) = getOuterClassesAndObjects(closure2).unzip
-    val (outerClasses3, _) = getOuterClassesAndObjects(closure3).unzip
+//    val (outerClasses1, _) = getOuterClassesAndObjects(closure1).unzip
+//    val (outerClasses2, _) = getOuterClassesAndObjects(closure2).unzip
+//    val (outerClasses3, _) = getOuterClassesAndObjects(closure3).unzip
 
-    val fields1t = findAccessedFields(closure1, outerClasses1)
-    val fields2t = findAccessedFields(closure2, outerClasses2)
-    val fields3t = findAccessedFields(closure3, outerClasses3)
+//    val fields1t = findAccessedFields(closure1, outerClasses1)
+//    val fields2t = findAccessedFields(closure2, outerClasses2)
+//    val fields3t = findAccessedFields(closure3, outerClasses3)
+
+    val (fields1t, outerClasses1) = fieldsAndClasses(closure1)
+    val (fields2t, outerClasses2) = fieldsAndClasses(closure2)
+    val (fields3t, outerClasses3) = fieldsAndClasses(closure3)
 
     assert(fields1t.size === 1)
     assert(fields1t(outerClasses1(0)).size == 0)
@@ -145,13 +139,16 @@ class TestFunctionConverter extends UnitSpec {
 
     // Because we find fields transitively now, we are able to detect that we need the
     // $outer pointer to get the field from the ClosureCleanerSuite2
-    assert(fields3t.size === 3)
+    assert(fields3t.size === 2)
     assert(fields3t(outerClasses3(0)).size === 1)
     assert(fields3t(outerClasses3(0)).head === "$outer")
     assert(fields3t(outerClasses3(1)).size === 1)
     assert(fields3t(outerClasses3(1)).head === "$outer")
-    assert(fields3t(outerClasses3(2)).size === 1)
-    assert(fields3t(outerClasses3(2)).head.contains("aPrimitiveValue"))
+  }
+
+  def fieldsAndClasses(closure1: AnyRef) = {
+    val deps = new ObjectDependencies(closure1)
+    (deps.fieldsReferenced, deps.outerClassesAndObjects.map(_._1))
   }
 
   it should "find accessed fields with nesting" in {
@@ -164,35 +161,29 @@ class TestFunctionConverter extends UnitSpec {
       val closure2 = () => a
       val closure3 = () => localValue
       val closure4 = () => aPrimitiveValue
-      val (outerClasses1, _) = getOuterClassesAndObjects(closure1).unzip
-      val (outerClasses2, _) = getOuterClassesAndObjects(closure2).unzip
-      val (outerClasses3, _) = getOuterClassesAndObjects(closure3).unzip
-      val (outerClasses4, _) = getOuterClassesAndObjects(closure4).unzip
+//      val (outerClasses1, _) = getOuterClassesAndObjects(closure1).unzip
+//      val (outerClasses2, _) = getOuterClassesAndObjects(closure2).unzip
+//      val (outerClasses3, _) = getOuterClassesAndObjects(closure3).unzip
+//      val (outerClasses4, _) = getOuterClassesAndObjects(closure4).unzip
 
       // Now do the same, but find fields that the closures transitively reference
-      val fields1t = findAccessedFields(closure1, outerClasses1)
-      val fields2t = findAccessedFields(closure2, outerClasses2)
-      val fields3t = findAccessedFields(closure3, outerClasses3)
-      val fields4t = findAccessedFields(closure4, outerClasses4)
+      val (fields1t, outerClasses1) = fieldsAndClasses(closure1)
+      val (fields2t, outerClasses2) = fieldsAndClasses(closure2)
+      val (fields3t, outerClasses3) = fieldsAndClasses(closure3)
+      val (fields4t, outerClasses4) = fieldsAndClasses(closure4)
       assert(fields1t.size === 1)
-      assert(fields2t.size === 4)
+      assert(fields2t.size === 2)
       assert(fields2t(outerClasses2(1)).size === 1) // `def a` references `localValue`
       assert(fields2t(outerClasses2(1)).head.contains("localValue"))
-      assert(fields2t(outerClasses2(2)).isEmpty)
-      assert(fields2t(outerClasses2(3)).isEmpty)
-      assert(fields3t.size === 4)
+      assert(fields3t.size === 2)
       assert(fields3t(outerClasses3(1)).size === 1) // as before
       assert(fields3t(outerClasses3(1)).head.contains("localValue"))
-      assert(fields3t(outerClasses3(2)).isEmpty)
-      assert(fields3t(outerClasses3(3)).isEmpty)
-      assert(fields4t.size === 4)
+      assert(fields4t.size === 3)
       // Through a series of method calls, we are able to detect that we ultimately access
       // ClosureCleanerSuite2's field `someSerializableValue`. Along the way, we also accessed
       // a few $outer parent pointers to get to the outermost object.
       assert(fields4t(outerClasses4(1)) === Set("$outer"))
       assert(fields4t(outerClasses4(2)) === Set("$outer"))
-      assert(fields4t(outerClasses4(3)).size === 1)
-      assert(fields4t(outerClasses4(3)).head.contains("aPrimitiveValue"))
     }
 
     test1()
@@ -200,7 +191,7 @@ class TestFunctionConverter extends UnitSpec {
 
   /** Helper method for testing whether closure cleaning works as expected. */
   private def checkParameters(closure: AnyRef, expected: (String, Any)*): Unit = {
-    val FunctionDecomposition(result, _) = FunctionConverter.findExternalReferences(closure)
+    val result = FunctionConverter.findExternalReferences(closure)
     result.size should equal(expected.size)
     def findMatchingParam(rex: Regex) = result.collect { case (k, v) if rex.pattern.matcher(k).matches => v}.headOption
     for ((name, value) <- expected) {
@@ -394,8 +385,8 @@ class TestFunctionConverter extends UnitSpec {
     checkParameters(closure1, "localValue" -> localValue)
     checkParameters(closure2, "localValue" -> localValue)
 
-    val f1 = FunctionConverter.findUsedFields(closure1)
-    val f2 = FunctionConverter.findUsedFields(closure2)
+    val f1 = new ObjectDependencies(closure1)
+    val f2 = new ObjectDependencies(closure2)
     f2 should not be null
 
   }
@@ -422,8 +413,8 @@ class TestFunctionConverter extends UnitSpec {
       // the outer closure (it only references local variables)
       checkParameters(inner2, "a" -> localValue)
 
-      val f1 = FunctionConverter.findUsedFields(inner1)
-      val f2 = FunctionConverter.findUsedFields(inner2)
+      val f1 = new ObjectDependencies(inner1)
+      val f2 = new ObjectDependencies(inner2)
       f2 should not be null
     }
 
@@ -477,7 +468,7 @@ class TestFunctionConverter extends UnitSpec {
 
     getClassFileContents(closure5.getClass) should equal(getClassFileContents(closure6.getClass))
 
-    val x = findUsedFields(closure1)
+    val x = new ObjectDependencies(closure1)
     x should not be null
   }
 

@@ -15,46 +15,46 @@ import java.nio.charset.Charset
 
 object FunctionConverter {
 
-  def findExternalReferences(
-    func: AnyRef): FunctionDecomposition = {
-    val accessedFields = MMap.empty[Class[_], MSet[String]]
-    if (func == null) {
-      return FunctionDecomposition(Map())
-    }
-
-    logDebug(s"+++ Cleaning closure $func (${func.getClass.getName}}) +++")
-
-    // A list of classes that represents closures enclosed in the given one
-    val innerClasses = getInnerClosureClasses(func)
-
-    // Fail fast if we detect return statements in closures
-    getClassReader(func.getClass).accept(new ReturnStatementFinder(), 0)
-
-    // List of outer (class, object) pairs, ordered from outermost to innermost
-    var outerPairs: List[(Class[_], AnyRef)] = getOuterClassesAndObjects(func)
-    val outerClosureObjects: Set[AnyRef] =
-      outerPairs.filter(t => isClosure(t._1)).map(_._2).toSet
-
-    // If accessed fields is not populated yet, we assume that
-    // the closure we are trying to clean is the starting one
-    logDebug(s" + populating accessed fields because this is the starting closure")
-    // Initialize accessed fields with the outer classes first
-    // This step is needed to associate the fields to the correct classes later
-    for (cls <- outerPairs.map(_._1) ++ innerClasses) {
-      accessedFields(cls) = MSet[String]()
-    }
-    // Populate accessed fields by visiting all fields and methods accessed by this and
-    // all of its inner closures. If transitive cleaning is enabled, this may recursively
-    // visits methods that belong to other classes in search of transitively referenced fields.
-    for (cls <- func.getClass :: innerClasses) {
-      getClassReader(cls).accept(new FieldAccessFinder(accessedFields), 0)
-    }
-
-    logDebug(s" + fields accessed by starting closure: " + accessedFields.size)
-    accessedFields.foreach { f => logDebug("     " + f)}
-
-    FunctionDecomposition(usedExternalFields(outerPairs, accessedFields.mapValues(_.toSet).toMap))
-  }
+  //  def findExternalReferences(
+  //    func: AnyRef): ClassDependencies = {
+  //    val accessedFields = MMap.empty[Class[_], MSet[String]]
+  //    if (func == null) {
+  //      return ClassDependencies(Map())
+  //    }
+  //
+  //    logDebug(s"+++ Cleaning closure $func (${func.getClass.getName}}) +++")
+  //
+  //    // A list of classes that represents closures enclosed in the given one
+  //    val innerClasses = getInnerClosureClasses(func)
+  //
+  //    // Fail fast if we detect return statements in closures
+  //    getClassReader(func.getClass).accept(new ReturnStatementFinder(), 0)
+  //
+  //    // List of outer (class, object) pairs, ordered from outermost to innermost
+  //    var outerPairs: List[(Class[_], AnyRef)] = getOuterClassesAndObjects(func)
+  //    val outerClosureObjects: Set[AnyRef] =
+  //      outerPairs.filter(t => isClosure(t._1)).map(_._2).toSet
+  //
+  //    // If accessed fields is not populated yet, we assume that
+  //    // the closure we are trying to clean is the starting one
+  //    logDebug(s" + populating accessed fields because this is the starting closure")
+  //    // Initialize accessed fields with the outer classes first
+  //    // This step is needed to associate the fields to the correct classes later
+  //    for (cls <- outerPairs.map(_._1) ++ innerClasses) {
+  //      accessedFields(cls) = MSet[String]()
+  //    }
+  //    // Populate accessed fields by visiting all fields and methods accessed by this and
+  //    // all of its inner closures. If transitive cleaning is enabled, this may recursively
+  //    // visits methods that belong to other classes in search of transitively referenced fields.
+  //    for (cls <- func.getClass :: innerClasses) {
+  //      getClassReader(cls).accept(new FieldAccessFinder(accessedFields), 0)
+  //    }
+  //
+  //    logDebug(s" + fields accessed by starting closure: " + accessedFields.size)
+  //    accessedFields.foreach { f => logDebug("     " + f)}
+  //
+  //    ClassDependencies(usedExternalFields(outerPairs, accessedFields.mapValues(_.toSet).toMap))
+  //  }
 
   private def usedExternalFields(
     outerPairs: List[(Class[_], AnyRef)],
@@ -68,7 +68,7 @@ object FunctionConverter {
         field.setAccessible(true)
         val value = field.get(obj)
         if (!isNull(value) && outerClosureObjects.find(_ eq value).isEmpty) {
-          require(isValidParameter(value),
+          require(isPrimitive(value),
             s"Field '$fieldName' of object [$obj] is not a primitive. Value is [$value]")
           val nameCandidates = List(
             fieldName.takeWhile(_ != '$'),
@@ -122,11 +122,11 @@ object FunctionConverter {
       case _ => false
     }
 
-  def isValidParameter(x: Any): Boolean = {
+  def isPrimitive(x: Any): Boolean = {
     def contentsValid(contents: Iterator[_]) = {
       var valid = true
       while (valid && contents.hasNext) {
-        valid = valid && isValidParameter(contents.next())
+        valid = valid && isPrimitive(contents.next())
       }
       valid
     }
@@ -148,10 +148,10 @@ object FunctionConverter {
         var valid = true
         val members = p.productIterator
         while (valid && members.hasNext) {
-          valid = valid && isValidParameter(members.next())
+          valid = valid && isPrimitive(members.next())
         }
         valid
-      case x => !isNull(x)
+      case x => false
     }
   }
 
@@ -168,27 +168,6 @@ object FunctionConverter {
       .accept(new FieldAccessFinder(fields), 0)
     fields.mapValues(_.toSet).toMap
   }
-
-  def findUsedFields(closure: AnyRef) = {
-    val outerClassesAndObjects = getOuterClassesAndObjects(closure)
-    val outerClasses = outerClassesAndObjects.map(_._1)
-    val innerClasses = getInnerClosureClasses(closure)
-    val fields = MMap[Class[_], MSet[String]](closure.getClass -> MSet.empty[String])
-    val extClasses = MSet.empty[Class[_]]
-    def handleClass = outerClasses.toSet ++ innerClasses.toSet
-    val visitor = new UsedFieldsFinder(
-      fields = fields,
-      handleClass = handleClass,
-      externalClassReferences = extClasses)
-    for (inner <- innerClasses) {
-      getClassReader(inner).accept(new UsedFieldsFinder(fields = fields, handleClass = handleClass, externalClassReferences = extClasses), 0)
-    }
-    getClassReader(closure.getClass).accept(visitor, 0)
-    val used = fields.mapValues(_.toSet).toMap
-    val externalUsed = usedExternalFields(outerClassesAndObjects, used)
-    (used, extClasses)
-  }
-
 
   /** Helper class to identify a method. */
   case class MethodIdentifier[T](cls: Class[T], name: String, desc: String)
@@ -258,11 +237,11 @@ object FunctionConverter {
   }
 
   class UsedFieldsFinder(
-    handleClass: Class[_] => Boolean = c => true,
+    trackedClasses: Set[Class[_]],
     handleMethod: (String, String) => Boolean = (a, b) => true,
     fields: MMap[Class[_], MSet[String]] = MMap.empty[Class[_], MSet[String]],
     visitedMethods: MSet[MethodIdentifier[_]] = MSet.empty,
-    externalClassReferences: MSet[Class[_]] = MSet.empty
+    untrackedClassesReferenced: MSet[Class[_]] = MSet.empty
     )
     extends ClassVisitor(ASM4) {
 
@@ -293,8 +272,8 @@ object FunctionConverter {
             1 + 1
           }
           val cl = loadClass(owner)
-          if (handleClass(cl)) {
-            fields.getOrElseUpdate(cl, MSet.empty[String])
+          if (trackedClasses(cl)) {
+            //            fields.getOrElseUpdate(cl, MSet.empty[String])
             // Optionally visit other methods to find fields that are transitively referenced
             val m = MethodIdentifier(cl, name, desc)
             if (!visitedMethods.contains(m)) {
@@ -302,17 +281,17 @@ object FunctionConverter {
               visitedMethods += m
               val visitor =
                 new UsedFieldsFinder(
-                  handleClass,
+                  trackedClasses,
                   (n: String, d: String) => n == name && d == desc,
                   fields,
                   visitedMethods,
-                  externalClassReferences)
+                  untrackedClassesReferenced)
               FunctionConverter.getClassReader(cl).accept(visitor, 0
               )
             }
           }
           else {
-            externalClassReferences += cl
+            untrackedClassesReferenced += cl
           }
         }
       }
@@ -321,8 +300,8 @@ object FunctionConverter {
 
   def getOuterClassesAndObjects(obj: AnyRef): List[(Class[_], AnyRef)] = {
     val buff = new ListBuffer[(Class[_], AnyRef)]()
-    buff += ((obj.getClass, obj))
     if (isClosure(obj.getClass)) {
+      buff += ((obj.getClass, obj))
       for (f <- obj.getClass.getDeclaredFields if f.getName == "$outer") {
         f.setAccessible(true)
         val outer = f.get(obj)
@@ -461,10 +440,75 @@ object FunctionConverter {
     val verifyClassName = new String(classNameBytes, Charset.forName("UTF8"))
     contents.take(classNameStart) ++ contents.drop(classNameStart + classNameLength)
   }
+
+  def findExternalReferences(obj: AnyRef) = {
+    val deps = new ObjectDependencies(obj)
+    deps.parameters
+  }
 }
 
-case class FunctionDecomposition(
-  externalReferences: Map[String, Any],
-  usedClasses: Set[Class[_]] = Set()
-  )
+class ObjectDependencies(obj: AnyRef) {
+
+  import org.allenai.pipeline.FunctionConverter._
+
+  lazy val outerClassesAndObjects = getOuterClassesAndObjects(obj)
+  private lazy val outerClosureObjects = outerClassesAndObjects.map(_._2)
+  private lazy val innerClosures = getInnerClosureClasses(obj)
+  lazy val (fieldsReferenced, otherClassesUsed) = {
+    val outerClasses = outerClassesAndObjects.map(_._1)
+    val innerClasses = innerClosures
+    val fields = MMap[Class[_], MSet[String]](obj.getClass -> MSet.empty[String])
+    val trackedClasses = outerClasses.toSet ++ innerClasses.toSet
+    val extClasses = MSet.empty[Class[_]]
+    val visitor = new UsedFieldsFinder(
+      fields = fields,
+      trackedClasses = trackedClasses,
+      untrackedClassesReferenced = extClasses)
+    for (inner <- innerClasses) {
+      getClassReader(inner).accept(new UsedFieldsFinder(fields = fields, trackedClasses = trackedClasses, untrackedClassesReferenced = extClasses), 0)
+    }
+    getClassReader(obj.getClass).accept(visitor, 0)
+    val used = fields.mapValues(_.toSet).toMap
+    (used, extClasses.toSet)
+
+  }
+  lazy val objectReferences = {
+    val refs = MMap.empty[(Class[_], String), AnyRef]
+    for ((cls, obj) <- outerClassesAndObjects) {
+      for (fieldName <- fieldsReferenced.getOrElse(cls, Set())) {
+        val field = cls.getDeclaredField(fieldName)
+        field.setAccessible(true)
+        val value = field.get(obj)
+        refs((cls, fieldName)) = value
+      }
+    }
+    refs.toMap
+  }
+  lazy val parameters = {
+    def isExternalRef(value: AnyRef) = outerClosureObjects.find(_ eq value).isEmpty
+    val externalRefs =
+      for {
+        ((cls, fieldName), value) <- objectReferences if
+      !isNull(value) &&
+        isExternalRef(value)} yield {
+        (fieldName, value)
+      }
+    val nonPrimitives = externalRefs.filter{case (k,v) => !isPrimitive(v)}
+    require(nonPrimitives.isEmpty,
+      s"""Object [$obj] reference non-primitive values: ${nonPrimitives.map { case (name, value) => s"$name='$value'"}.mkString(" ")}""")
+    externalRefs.toMap
+    val params = MMap.empty[String, Any]
+      for ((fieldName, value) <- externalRefs) {
+        val name = fieldName.takeWhile(_ != '$')
+        require(!params.contains(name), s"Object [$obj] has multiple fields named '$name'")
+        params(name) = value
+      }
+    params.toMap
+  }
+  //            s"Field '$fieldName' of object [$obj] is not a primitive. Value is [$value]")
+  //          val nameCandidates = List(
+  //            fieldName.takeWhile(_ != '$'),
+  //            fieldName,
+  //            s"$obj.$fieldName")
+}
 
