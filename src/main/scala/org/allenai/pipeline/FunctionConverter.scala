@@ -10,7 +10,7 @@ import scala.collection.mutable
 import scala.collection.mutable.{ListBuffer, Map => MMap, Set => MSet}
 import scala.runtime.VolatileObjectRef
 
-import java.io.{ByteArrayInputStream, ByteArrayOutputStream, InputStream}
+import java.io.ByteArrayOutputStream
 import java.nio.charset.Charset
 
 object FunctionConverter {
@@ -18,10 +18,8 @@ object FunctionConverter {
   def findExternalReferences(
     func: AnyRef): FunctionDecomposition = {
     val accessedFields = MMap.empty[Class[_], MSet[String]]
-    val params = MMap.empty[String, Any]
-
     if (func == null) {
-      return FunctionDecomposition(params.toMap)
+      return FunctionDecomposition(Map())
     }
 
     logDebug(s"+++ Cleaning closure $func (${func.getClass.getName}}) +++")
@@ -55,12 +53,16 @@ object FunctionConverter {
     logDebug(s" + fields accessed by starting closure: " + accessedFields.size)
     accessedFields.foreach { f => logDebug("     " + f)}
 
+    FunctionDecomposition(usedExternalFields(outerPairs, accessedFields.mapValues(_.toSet).toMap))
+  }
+
+  private def usedExternalFields(
+    outerPairs: List[(Class[_], AnyRef)],
+    accessedFields: Map[Class[_], Set[String]]) = {
+    val outerClosureObjects: Set[AnyRef] =
+      outerPairs.filter(t => isClosure(t._1)).map(_._2).toSet
+    val params = MMap.empty[String, Any]
     for ((cls, obj) <- outerPairs) {
-      logDebug(s" + cloning the object $obj of class ${cls.getName}")
-      // We null out these unused references by cloning each object and then filling in all
-      // required fields from the original object. We need the parent here because the Java
-      // language specification requires the first constructor parameter of any closure to be
-      // its enclosing object.
       for (fieldName <- accessedFields(cls)) {
         val field = cls.getDeclaredField(fieldName)
         field.setAccessible(true)
@@ -74,12 +76,13 @@ object FunctionConverter {
             s"$obj.$fieldName")
           nameCandidates.find(s => !params.contains(s)) match {
             case Some(name) => params(name) = value
-            case None => sys.error(s"Multiple fields with same name: $fieldName")
+            case None => sys.error(s"Object [$obj] has multiple fields with same name: $fieldName")
           }
         }
       }
     }
-    FunctionDecomposition(params.toMap)
+    params.toMap
+
   }
 
   def stepInfoFor(func: AnyRef): PipelineStepInfo = {
@@ -112,12 +115,12 @@ object FunctionConverter {
   def logDebug(s: String) = () //println(s)
 
   def isNull(x: Any) =
-  x match {
-    case ref: VolatileObjectRef[_] =>
-      ref.toString == "null"
-    case null => true
-    case _ => false
-  }
+    x match {
+      case ref: VolatileObjectRef[_] =>
+        ref.toString == "null"
+      case null => true
+      case _ => false
+    }
 
   def isValidParameter(x: Any): Boolean = {
     def contentsValid(contents: Iterator[_]) = {
@@ -164,6 +167,26 @@ object FunctionConverter {
     getClassReader(closure.getClass)
       .accept(new FieldAccessFinder(fields), 0)
     fields.mapValues(_.toSet).toMap
+  }
+
+  def findUsedFields(closure: AnyRef) = {
+    val outerClassesAndObjects = getOuterClassesAndObjects(closure)
+    val outerClasses = outerClassesAndObjects.map(_._1)
+    val innerClasses = getInnerClosureClasses(closure)
+    val fields = MMap[Class[_], MSet[String]](closure.getClass -> MSet.empty[String])
+    val extClasses = MSet.empty[Class[_]]
+    def handleClass = outerClasses.toSet ++ innerClasses.toSet
+    val visitor = new UsedFieldsFinder(
+      fields = fields,
+      handleClass = handleClass,
+      externalClassReferences = extClasses)
+    for (inner <- innerClasses) {
+      getClassReader(inner).accept(new UsedFieldsFinder(fields = fields, handleClass = handleClass, externalClassReferences = extClasses), 0)
+    }
+    getClassReader(closure.getClass).accept(visitor, 0)
+    val used = fields.mapValues(_.toSet).toMap
+    val externalUsed = usedExternalFields(outerClassesAndObjects, used)
+    (used, extClasses)
   }
 
 
@@ -228,6 +251,68 @@ object FunctionConverter {
                 new FieldAccessFinder(fields, Some(m), visitedMethods), 0
               )
             }
+          }
+        }
+      }
+    }
+  }
+
+  class UsedFieldsFinder(
+    handleClass: Class[_] => Boolean = c => true,
+    handleMethod: (String, String) => Boolean = (a, b) => true,
+    fields: MMap[Class[_], MSet[String]] = MMap.empty[Class[_], MSet[String]],
+    visitedMethods: MSet[MethodIdentifier[_]] = MSet.empty,
+    externalClassReferences: MSet[Class[_]] = MSet.empty
+    )
+    extends ClassVisitor(ASM4) {
+
+    private def loadClass(owner: String) = Class.forName(owner.replace('/', '.'), false, Thread.currentThread.getContextClassLoader)
+
+    override def visitMethod(
+      access: Int,
+      name: String,
+      desc: String,
+      sig: String,
+      exceptions: Array[String]
+      ): MethodVisitor = {
+
+      // If we are told to visit only a certain method and this is not the one, ignore it
+      if (!handleMethod(name, desc)) {
+        return null
+      }
+
+      new MethodVisitor(ASM4) {
+        override def visitFieldInsn(op: Int, owner: String, name: String, desc: String) {
+          if (op == GETFIELD) {
+            fields.getOrElseUpdate(loadClass(owner), MSet.empty[String]).add(name)
+          }
+        }
+
+        override def visitMethodInsn(op: Int, owner: String, name: String, desc: String) {
+          if (!owner.contains("scala")) {
+            1 + 1
+          }
+          val cl = loadClass(owner)
+          if (handleClass(cl)) {
+            fields.getOrElseUpdate(cl, MSet.empty[String])
+            // Optionally visit other methods to find fields that are transitively referenced
+            val m = MethodIdentifier(cl, name, desc)
+            if (!visitedMethods.contains(m)) {
+              // Keep track of visited methods to avoid potential infinite cycles
+              visitedMethods += m
+              val visitor =
+                new UsedFieldsFinder(
+                  handleClass,
+                  (n: String, d: String) => n == name && d == desc,
+                  fields,
+                  visitedMethods,
+                  externalClassReferences)
+              FunctionConverter.getClassReader(cl).accept(visitor, 0
+              )
+            }
+          }
+          else {
+            externalClassReferences += cl
           }
         }
       }
@@ -363,11 +448,11 @@ object FunctionConverter {
 
   def stripClassName(contents: Array[Byte]): Array[Byte] = {
     val reader = new ClassReader(contents)
-//    reader.accept(new FieldAccessFinder(MMap.empty[Class[_], MSet[String]]), 0)
-    reader.accept(new ClassVisitor(ASM4) { }, 0)
+    //    reader.accept(new FieldAccessFinder(MMap.empty[Class[_], MSet[String]]), 0)
+    reader.accept(new ClassVisitor(ASM4) {}, 0)
     val buff = new Array[Char](500)
     val className = reader.readClass(reader.header + 2, buff)
-    val itemIndex1 = reader.readUnsignedShort(reader.header+2)
+    val itemIndex1 = reader.readUnsignedShort(reader.header + 2)
     val cn2 = reader.readUTF8(reader.getItem(itemIndex1), buff)
     val itemIndex2 = reader.readUnsignedShort(reader.getItem(itemIndex1))
     val classNameLength = reader.readUnsignedShort(reader.getItem(itemIndex2))
@@ -379,7 +464,7 @@ object FunctionConverter {
 }
 
 case class FunctionDecomposition(
-  externalReferences: Map[String, Any] = Map(),
-  implementation: Map[String, Array[Byte]] = Map()
+  externalReferences: Map[String, Any],
+  usedClasses: Set[Class[_]] = Set()
   )
 
