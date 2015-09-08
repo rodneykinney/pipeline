@@ -73,6 +73,70 @@ object ClosureAnalyzer {
     }
   }
 
+  case class ClassUsage(transitive: Boolean, fieldsAccessed: Set[String] = Set(), methodsInvoked:Set[MethodId] = Set()) {
+    def addFieldAccessed(name: String) = this.copy(fieldsAccessed = this.fieldsAccessed + name)
+    def addMethodInvoked(id: MethodId) = this.copy(methodsInvoked = this.methodsInvoked + id)
+  }
+  case class MethodId(name: String, desc: String)
+
+  class ClassUsageAnalyzer(
+    usages: MMap[Class[_], ClassUsage],
+    transitive: Class[_] => Boolean,
+    handleMethod: MethodId => Boolean = m => true)
+    extends ClassVisitor(ASM4) {
+
+    private def loadClass(owner: String) = Class.forName(owner.replace('/', '.'), false, Thread.currentThread.getContextClassLoader)
+
+    override def visitMethod(
+      access: Int,
+      name: String,
+      desc: String,
+      sig: String,
+      exceptions: Array[String]
+      ): MethodVisitor = {
+
+      // If we are told to visit only a certain method and this is not the one, ignore it
+      if (!handleMethod(MethodId(name, desc))) {
+        return null
+      }
+
+      new MethodVisitor(ASM4) {
+        override def visitFieldInsn(op: Int, owner: String, name: String, desc: String) {
+          if (op == GETFIELD) {
+            val cl = loadClass(owner)
+            val usage = usages.getOrElseUpdate(cl, ClassUsage(transitive(cl)))
+            usages(cl) = usage.addFieldAccessed(name)
+          }
+        }
+
+        override def visitMethodInsn(op: Int, owner: String, name: String, desc: String) {
+          if (!owner.startsWith("java/") && !owner.startsWith("scala/")) {
+            val cl = loadClass(owner)
+            val method = MethodId(name, desc)
+            val visitedBefore = usages.get(cl).exists(_.methodsInvoked.contains(method))
+            val usage = usages.getOrElseUpdate(cl, ClassUsage(transitive(cl)))
+            usages(cl) = usage.addMethodInvoked(method)
+            if (transitive(cl)) {
+              // Optionally visit other methods to find fields that are transitively referenced
+              if (!visitedBefore) {
+                // Keep track of visited methods to avoid potential infinite cycles
+                val visitor =
+                  new ClassUsageAnalyzer(
+                    usages,
+                    transitive,
+                    m => m == method
+                  )
+                ClosureAnalyzer.getClassReader(cl).accept(visitor, 0)
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+
+
   /** Helper class to identify a method. */
   case class MethodIdentifier[T](cls: Class[T], name: String, desc: String)
 
@@ -217,7 +281,7 @@ object ClosureAnalyzer {
 
 }
 
-class ClosureAnalyzer(closure: AnyRef) {
+class ClosureAnalyzer(val closure: AnyRef) {
 
   import org.allenai.pipeline.ClosureAnalyzer._
 
@@ -230,19 +294,28 @@ class ClosureAnalyzer(closure: AnyRef) {
   def outerClosureClasses = outerClassesAndObjects.map(_._1)
 
   val innerClosureClasses = getInnerClosureClasses(closure)
+
+  val classUsages = {
+    val transitive = outerClosureClasses.toSet ++ innerClosureClasses.toSet
+    val usages: MMap[Class[_], ClassUsage] = MMap()
+    val visitor = new ClassUsageAnalyzer(usages, transitive)
+    for (inner <- innerClosureClasses) {
+      getClassReader(inner).accept(visitor, 0)
+    }
+    getClassReader(closure.getClass).accept(visitor, 0)
+    usages.toMap
+  }
+
   val (fieldsReferenced, classesReferenced) = {
-    val outerClasses = outerClosureClasses
-    val innerClasses = innerClosureClasses
     val fields = MMap[Class[_], MSet[String]](closure.getClass -> MSet.empty[String])
-    val trackedClasses = outerClasses.toSet ++ innerClasses.toSet
-    //    val trackedClasses = innerClasses.toSet + this.getClass
+    val trackedClasses = outerClosureClasses.toSet ++ innerClosureClasses.toSet
     val extClasses = MSet.empty[Class[_]]
     val visitor = new UsedFieldsFinder(
       fields = fields,
       trackedClasses = trackedClasses,
       dependentClasses = extClasses
     )
-    for (inner <- innerClasses) {
+    for (inner <- innerClosureClasses) {
       getClassReader(inner).accept(visitor, 0)
     }
     getClassReader(closure.getClass).accept(visitor, 0)
