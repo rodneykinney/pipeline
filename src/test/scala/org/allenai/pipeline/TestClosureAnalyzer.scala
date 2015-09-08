@@ -248,7 +248,7 @@ class TestClosureAnalyzer extends UnitSpec {
     val localValue = aPrimitiveValue
     val closure1 = (x: NonPrimitive) => x.id * 5
     val closure2 = (x: NonPrimitive) => x.id * 5 + localValue
-    val closure3 = (x: NonPrimitive, y: Int) => x.id * y + localValue
+    val closure3 = (x: NonPrimitive, y: Int) => x.id * y + aPrimitiveValue
 
     val ca1 = new ClosureAnalyzer(closure1)
     val ca2 = new ClosureAnalyzer(closure2)
@@ -256,10 +256,10 @@ class TestClosureAnalyzer extends UnitSpec {
 
     checkRefs(ca1)()()
     checkRefs(ca2)("localValue" -> localValue)()
-    checkRefs(ca3)("localValue" -> localValue)()
+    checkRefs(ca3)()(this)
     checkClasses(ca1)(classOf[NonPrimitive])
     checkClasses(ca2)(classOf[NonPrimitive])
-    checkClasses(ca3)(classOf[NonPrimitive])
+    checkClasses(ca3)(classOf[NonPrimitive], this.getClass)
   }
 
   it should "find references in inner classes" in {
