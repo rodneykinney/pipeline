@@ -4,13 +4,12 @@ import org.allenai.common.Resource
 
 import org.apache.commons.io.IOUtils
 import org.objectweb.asm.Opcodes._
-import org.objectweb.asm.{ClassReader, ClassVisitor, MethodVisitor, Type}
+import org.objectweb.asm.{ ClassReader, ClassVisitor, MethodVisitor, Type }
 
-import scala.collection.mutable.{ListBuffer, Map => MMap, Set => MSet}
+import scala.collection.mutable.{ ListBuffer, Map => MMap, Set => MSet }
 import scala.runtime.VolatileObjectRef
 
 import java.io.ByteArrayOutputStream
-import java.nio.charset.Charset
 
 object ClosureAnalyzer {
 
@@ -70,7 +69,7 @@ object ClosureAnalyzer {
           valid = valid && isPrimitive(members.next())
         }
         valid
-      case x => false
+      case other => false
     }
   }
 
@@ -82,9 +81,9 @@ object ClosureAnalyzer {
     handleMethod: (String, String) => Boolean = (a, b) => true,
     fields: MMap[Class[_], MSet[String]] = MMap.empty[Class[_], MSet[String]],
     visitedMethods: MSet[MethodIdentifier[_]] = MSet.empty,
-    untrackedClassesReferenced: MSet[Class[_]] = MSet.empty
-    )
-    extends ClassVisitor(ASM4) {
+    dependentClasses: MSet[Class[_]] = MSet.empty
+  )
+      extends ClassVisitor(ASM4) {
 
     private def loadClass(owner: String) = Class.forName(owner.replace('/', '.'), false, Thread.currentThread.getContextClassLoader)
 
@@ -94,7 +93,7 @@ object ClosureAnalyzer {
       desc: String,
       sig: String,
       exceptions: Array[String]
-      ): MethodVisitor = {
+    ): MethodVisitor = {
 
       // If we are told to visit only a certain method and this is not the one, ignore it
       if (!handleMethod(name, desc)) {
@@ -109,12 +108,8 @@ object ClosureAnalyzer {
         }
 
         override def visitMethodInsn(op: Int, owner: String, name: String, desc: String) {
-          if (!owner.contains("scala")) {
-            1 + 1
-          }
           val cl = loadClass(owner)
           if (trackedClasses(cl)) {
-            //            fields.getOrElseUpdate(cl, MSet.empty[String])
             // Optionally visit other methods to find fields that are transitively referenced
             val m = MethodIdentifier(cl, name, desc)
             if (!visitedMethods.contains(m)) {
@@ -126,13 +121,12 @@ object ClosureAnalyzer {
                   (n: String, d: String) => n == name && d == desc,
                   fields,
                   visitedMethods,
-                  untrackedClassesReferenced)
-              ClosureAnalyzer.getClassReader(cl).accept(visitor, 0
-              )
+                  dependentClasses
+                )
+              ClosureAnalyzer.getClassReader(cl).accept(visitor, 0)
             }
-          }
-          else {
-            untrackedClassesReferenced += cl
+          } else if (!owner.startsWith("java/") && !owner.startsWith("scala/")) {
+            dependentClasses += cl
           }
         }
       }
@@ -158,13 +152,12 @@ object ClosureAnalyzer {
     cls.getName.contains("$anonfun$")
   }
 
-
   /** Return a list of classes that represent closures enclosed in the given closure object.
     */
   def getInnerClosureClasses(obj: AnyRef): List[Class[_]] = {
     val seen = MSet[Class[_]](obj.getClass)
     var stack = List[Class[_]](obj.getClass)
-    while (!stack.isEmpty) {
+    while (stack.nonEmpty) {
       val cr = getClassReader(stack.head)
       stack = stack.tail
       val set = MSet[Class[_]]()
@@ -197,11 +190,6 @@ object ClosureAnalyzer {
   private class InnerClosureFinder(output: MSet[Class[_]]) extends ClassVisitor(ASM4) {
     var myName: String = null
 
-    // TODO: Recursively find inner closures that we indirectly reference, e.g.
-    //   val closure1 = () = { () => 1 }
-    //   val closure2 = () => { (1 to 5).map(closure1) }
-    // The second closure technically has two inner closures, but this finder only finds one
-
     override def visit(version: Int, access: Int, name: String, sig: String,
       superName: String, interfaces: Array[String]) {
       myName = name
@@ -226,22 +214,6 @@ object ClosureAnalyzer {
       }
     }
   }
-
-  def stripClassName(contents: Array[Byte]): Array[Byte] = {
-    val reader = new ClassReader(contents)
-    //    reader.accept(new FieldAccessFinder(MMap.empty[Class[_], MSet[String]]), 0)
-    reader.accept(new ClassVisitor(ASM4) {}, 0)
-    val buff = new Array[Char](500)
-    val className = reader.readClass(reader.header + 2, buff)
-    val itemIndex1 = reader.readUnsignedShort(reader.header + 2)
-    val cn2 = reader.readUTF8(reader.getItem(itemIndex1), buff)
-    val itemIndex2 = reader.readUnsignedShort(reader.getItem(itemIndex1))
-    val classNameLength = reader.readUnsignedShort(reader.getItem(itemIndex2))
-    val classNameStart = reader.getItem(itemIndex2) + 2
-    val classNameBytes = contents.drop(classNameStart).take(classNameLength)
-    val verifyClassName = new String(classNameBytes, Charset.forName("UTF8"))
-    contents.take(classNameStart) ++ contents.drop(classNameStart + classNameLength)
-  }
 }
 
 class ClosureAnalyzer(obj: AnyRef) {
@@ -250,7 +222,6 @@ class ClosureAnalyzer(obj: AnyRef) {
 
   require(isClosure(obj.getClass), s"${obj.getClass} is not an anonymous closure")
 
-
   private val outerClassesAndObjects = getOuterClassesAndObjects(obj)
 
   def outerClosureObjects = outerClassesAndObjects.map(_._2)
@@ -258,7 +229,7 @@ class ClosureAnalyzer(obj: AnyRef) {
   def outerClosureClasses = outerClassesAndObjects.map(_._1)
 
   val innerClosureClasses = getInnerClosureClasses(obj)
-  val (fieldsReferenced, otherClassesUsed) = {
+  val (fieldsReferenced, classesReferenced) = {
     val outerClasses = outerClassesAndObjects.map(_._1)
     val innerClasses = innerClosureClasses
     val fields = MMap[Class[_], MSet[String]](obj.getClass -> MSet.empty[String])
@@ -267,9 +238,10 @@ class ClosureAnalyzer(obj: AnyRef) {
     val visitor = new UsedFieldsFinder(
       fields = fields,
       trackedClasses = trackedClasses,
-      untrackedClassesReferenced = extClasses)
+      dependentClasses = extClasses
+    )
     for (inner <- innerClasses) {
-      getClassReader(inner).accept(new UsedFieldsFinder(fields = fields, trackedClasses = trackedClasses, untrackedClassesReferenced = extClasses), 0)
+      getClassReader(inner).accept(new UsedFieldsFinder(fields = fields, trackedClasses = trackedClasses, dependentClasses = extClasses), 0)
     }
     getClassReader(obj.getClass).accept(visitor, 0)
     val used = fields.mapValues(_.toSet).toMap
@@ -293,17 +265,10 @@ class ClosureAnalyzer(obj: AnyRef) {
 
   val (externalPrimitivesReferenced, externalNonPrimitivesReferenced) =
     objectsReferenced
-      .filterNot { case ((cls, fieldName), value) => isNull(value)}
-      .filter { case ((cls, fieldName), value) => isExternalRef(value)}
-      .partition { case ((cls, fieldName), value) => isPrimitive(value)}
+      .filterNot { case ((cls, fieldName), value) => isNull(value) }
+      .filter { case ((cls, fieldName), value) => isExternalRef(value) }
+      .partition { case ((cls, fieldName), value) => isPrimitive(value) }
   val parameters = {
-//    if (externalNonPrimitivesReferenced.nonEmpty) {
-//      val badReferences =
-//        (for (((cls, fieldName), value) <- externalNonPrimitivesReferenced) yield {
-//          s"$fieldName='$value'"
-//        }).mkString("; ")
-//      sys.error(s"Closure $obj[${obj.getClass.getName}}] references non-primitive values: $badReferences")
-//    }
     val params = MMap.empty[String, Any]
     for (((cls, fieldName), value) <- externalPrimitivesReferenced) {
       val name = fieldName.takeWhile(_ != '$')
