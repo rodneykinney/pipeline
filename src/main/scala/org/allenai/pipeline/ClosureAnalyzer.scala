@@ -4,9 +4,9 @@ import org.allenai.common.Resource
 
 import org.apache.commons.io.IOUtils
 import org.objectweb.asm.Opcodes._
-import org.objectweb.asm.{ ClassReader, ClassVisitor, MethodVisitor, Type }
+import org.objectweb.asm.{ClassReader, ClassVisitor, MethodVisitor, Type}
 
-import scala.collection.mutable.{ ListBuffer, Map => MMap, Set => MSet }
+import scala.collection.mutable.{ListBuffer, Map => MMap, Set => MSet}
 import scala.runtime.VolatileObjectRef
 
 import java.io.ByteArrayOutputStream
@@ -82,8 +82,8 @@ object ClosureAnalyzer {
     fields: MMap[Class[_], MSet[String]] = MMap.empty[Class[_], MSet[String]],
     visitedMethods: MSet[MethodIdentifier[_]] = MSet.empty,
     dependentClasses: MSet[Class[_]] = MSet.empty
-  )
-      extends ClassVisitor(ASM4) {
+    )
+    extends ClassVisitor(ASM4) {
 
     private def loadClass(owner: String) = Class.forName(owner.replace('/', '.'), false, Thread.currentThread.getContextClassLoader)
 
@@ -93,7 +93,7 @@ object ClosureAnalyzer {
       desc: String,
       sig: String,
       exceptions: Array[String]
-    ): MethodVisitor = {
+      ): MethodVisitor = {
 
       // If we are told to visit only a certain method and this is not the one, ignore it
       if (!handleMethod(name, desc)) {
@@ -214,26 +214,28 @@ object ClosureAnalyzer {
       }
     }
   }
+
 }
 
-class ClosureAnalyzer(obj: AnyRef) {
+class ClosureAnalyzer(closure: AnyRef) {
 
   import org.allenai.pipeline.ClosureAnalyzer._
 
-  require(isClosure(obj.getClass), s"${obj.getClass} is not an anonymous closure")
+  require(isClosure(closure.getClass), s"${closure.getClass} is not an anonymous closure")
 
-  private val outerClassesAndObjects = getOuterClassesAndObjects(obj)
+  private val outerClassesAndObjects = getOuterClassesAndObjects(closure)
 
   def outerClosureObjects = outerClassesAndObjects.map(_._2)
 
   def outerClosureClasses = outerClassesAndObjects.map(_._1)
 
-  val innerClosureClasses = getInnerClosureClasses(obj)
+  val innerClosureClasses = getInnerClosureClasses(closure)
   val (fieldsReferenced, classesReferenced) = {
-    val outerClasses = outerClassesAndObjects.map(_._1)
+    val outerClasses = outerClosureClasses
     val innerClasses = innerClosureClasses
-    val fields = MMap[Class[_], MSet[String]](obj.getClass -> MSet.empty[String])
+    val fields = MMap[Class[_], MSet[String]](closure.getClass -> MSet.empty[String])
     val trackedClasses = outerClasses.toSet ++ innerClasses.toSet
+    //    val trackedClasses = innerClasses.toSet + this.getClass
     val extClasses = MSet.empty[Class[_]]
     val visitor = new UsedFieldsFinder(
       fields = fields,
@@ -241,9 +243,9 @@ class ClosureAnalyzer(obj: AnyRef) {
       dependentClasses = extClasses
     )
     for (inner <- innerClasses) {
-      getClassReader(inner).accept(new UsedFieldsFinder(fields = fields, trackedClasses = trackedClasses, dependentClasses = extClasses), 0)
+      getClassReader(inner).accept(visitor, 0)
     }
-    getClassReader(obj.getClass).accept(visitor, 0)
+    getClassReader(closure.getClass).accept(visitor, 0)
     val used = fields.mapValues(_.toSet).toMap
     (used, extClasses.toSet)
 
@@ -261,21 +263,42 @@ class ClosureAnalyzer(obj: AnyRef) {
     refs.toMap
   }
 
-  private def isExternalRef(value: AnyRef) = outerClosureObjects.find(_ eq value).isEmpty
+  private def isExternalRef(value: AnyRef) = {
+    outerClosureObjects.find(_ eq value).isEmpty
+  }
+
+  private def parameterName(cls: Class[_], fieldName: String) = {
+    if (fieldName.startsWith(cls.getName.replace('.', '$'))) {
+      fieldName.drop(cls.getName.size).dropWhile(_ == '$').takeWhile(_ != '$')
+    }
+    else {
+      fieldName.takeWhile(_ != '$')
+    }
+  }
 
   val (externalPrimitivesReferenced, externalNonPrimitivesReferenced) =
     objectsReferenced
-      .filterNot { case ((cls, fieldName), value) => isNull(value) }
-      .filter { case ((cls, fieldName), value) => isExternalRef(value) }
-      .partition { case ((cls, fieldName), value) => isPrimitive(value) }
+      .filterNot { case ((cls, fieldName), value) => isNull(value)}
+      .filter { case ((cls, fieldName), value) => isExternalRef(value)}
+      .partition { case ((cls, fieldName), value) => isPrimitive(value)}
   val parameters = {
     val params = MMap.empty[String, Any]
     for (((cls, fieldName), value) <- externalPrimitivesReferenced) {
-      val name = fieldName.takeWhile(_ != '$')
-      require(!params.contains(name), s"Object [$obj] has multiple fields named '$name'")
+      val name = parameterName(cls, fieldName)
+      require(!params.contains(name), s"Object $closure[${closure.getClass.getName}}] has multiple fields named '$name'")
       params(name) = value
     }
     params.toMap
+  }
+
+  def checkNoBadReferences() = {
+    if (externalNonPrimitivesReferenced.nonEmpty) {
+      val badReferences =
+        for (((cls, fieldName), value) <- externalNonPrimitivesReferenced) yield {
+          s"$fieldName='$value'"
+        }
+      sys.error(s"Closure $closure[${closure.getClass.getName}] has references to external non-primitive objects: {${badReferences.mkString("; ")}}. Should refer to local val's instead of class members")
+    }
   }
 }
 

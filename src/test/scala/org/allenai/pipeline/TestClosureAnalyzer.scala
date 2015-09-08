@@ -133,6 +133,7 @@ class TestClosureAnalyzer extends UnitSpec {
   }
 
   it should "detect non-primitive references in basic closures" in {
+    self:Unit =>
     val closure1 = () => this
     val closure2 = () => methodReturningNonPrimitive()
     val closure3 = () => methodReturningPrimitive()
@@ -228,6 +229,8 @@ class TestClosureAnalyzer extends UnitSpec {
     val ca4 = new ClosureAnalyzer(asDef _)
     val ca5 = new ClosureAnalyzer(ObjectWithMethod.curriedMethod(55) _)
     val ca6 = new ClosureAnalyzer(ObjectWithMethod.handCurriedMethod(55))
+    val instance = new UseConstructorParam(55)
+    val ca7 = new ClosureAnalyzer(instance.add _)
 
     checkRefs(ca1)()()
     checkRefs(ca2)()()
@@ -235,6 +238,7 @@ class TestClosureAnalyzer extends UnitSpec {
     checkRefs(ca4)()()
     checkRefs(ca5)()()
     checkRefs(ca6)("delta" -> 55)()
+    checkRefs(ca7)()(instance)
 
     checkClasses(ca1)(ObjectWithMethod.getClass)
     checkClasses(ca2)(ObjectWithMethod.getClass)
@@ -242,6 +246,7 @@ class TestClosureAnalyzer extends UnitSpec {
     checkClasses(ca4)(ObjectWithMethod.getClass)
     checkClasses(ca5)(ObjectWithMethod.getClass)
     checkClasses(ca6)()
+    checkClasses(ca7)(classOf[UseConstructorParam])
   }
 
   it should "find parameters in functions of non-primitive arguments" in {
@@ -415,5 +420,9 @@ object ObjectWithMethod {
   def curriedMethod(delta: Int)(x: Int) = x + delta
 
   def handCurriedMethod(delta: Int) = (x: Int) => x + delta
+}
+
+class UseConstructorParam(x: Int) {
+  def add(y: Int) = x + y
 }
 
