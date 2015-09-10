@@ -17,8 +17,12 @@ object PipeFunctions {
       info = info.copy(className = name)
       this
     }
-    def withParameters(args: (String, Any)*) = {
+    def addParameters(args: (String, Any)*) = {
       info = info.addParameters(args: _*)
+      this
+    }
+    def withParameters(args: (String, Any)*) = {
+      info = info.copy(parameters = args.map { case (k, v) => (k, String.valueOf(v)) }.toMap)
       this
     }
     def persisted[A <: Artifact: ClassTag](

@@ -10,16 +10,7 @@ class TestPipeFunctions extends UnitSpec {
 
   import IoHelpers._
   import PipeFunctions._
-
-  val seed = 55
-  val rng = () => {
-    val rand = new Random(seed)
-    (0 to 10).map(i => rand.nextDouble())
-  }
-  def expOfList(d: Iterable[Double]) = d.map(math.exp)
-  def logOfList(d: Iterable[Double]) = d.map(math.log)
-  def multiplyLists(d1: Iterable[Double], d2: Iterable[Double]) =
-    d1.zip(d2).map { case (x, y) => x * y }
+  import TestFunctionsInObject._
 
   def newPipeline = Pipeline(new File("pipeline-output"))
 
@@ -62,4 +53,16 @@ class TestPipeFunctions extends UnitSpec {
     pipeline.run("Test Run")
     pipeline.openDiagram()
   }
+}
+
+object TestFunctionsInObject {
+  val seed = 55
+  val rng = () => {
+    val rand = new Random(seed)
+    (0 to 10).map(i => rand.nextDouble())
+  }
+  def expOfList(d: Iterable[Double]) = d.map(math.exp)
+  def logOfList(d: Iterable[Double]) = d.map(math.log)
+  def multiplyLists(d1: Iterable[Double], d2: Iterable[Double]) =
+    d1.zip(d2).map { case (x, y) => x * y }
 }
