@@ -1,28 +1,77 @@
 package org.allenai.pipeline
 
+import scala.reflect.ClassTag
+
 object PipeFunctions {
 
   import scala.language.implicitConversions
 
-  implicit def F0toP[T](func: () => T): ProducerBuilder[T] = {
-    new ProducerBuilder0(func)
+  implicit def Build[T](builder: ProducerBuilder[T]): Producer[T] = builder.build
+
+  trait ProducerBuilder[T] {
+    outer =>
+    protected[this] var info: PipelineStepInfo = PipelineStepInfo("")
+    val impl: AnyRef
+    lazy val usage = new ClosureAnalyzer(impl)
+    def withName(name: String) = {
+      info = info.copy(className = name)
+      this
+    }
+    def withParameters(args: (String, Any)*) = {
+      info = info.addParameters(args: _*)
+      this
+    }
+    def persisted[A <: Artifact: ClassTag](
+      io: Serializer[T, A] with Deserializer[T, A]
+    )(
+      implicit
+      pipeline: Pipeline
+    ) = {
+      pipeline.persist(build, io)
+    }
+    def create(): T
+    lazy val build = {
+      usage
+      val localInfo = info
+      new Producer[T] {
+        override def create = outer.create()
+        override def stepInfo = localInfo
+      }
+    }
   }
-}
 
-trait ProducerBuilder[T] extends Producer[T] {
-  protected[this] var _stepInfo: PipelineStepInfo = PipelineStepInfo("")
-  def pipeTo[O2](func: T => O2) = new ProducerBuilder1(this, func)
-  def withName(name: String) = {
-    _stepInfo = _stepInfo.copy(className = name)
-    this
+  implicit class ProducerBuilder0[T](func: () => T) {
+    def withNoInputs = new ProducerBuilder[T] {
+      val impl = func
+      info =
+        info.copy(className = func.getClass.getName)
+      def create() = func()
+    }
   }
-  def stepInfo = _stepInfo
-}
 
-class ProducerBuilder0[T](func: () => T) extends ProducerBuilder[T] {
-  def create = func()
-}
-
-class ProducerBuilder1[I, O](input: Producer[I], func: I => O) extends ProducerBuilder[O] {
-  def create = func(input.get)
+  implicit class ProducerBuilder1[I, O](func: I => O) {
+    def withInput(input: Producer[I]) = {
+      new ProducerBuilder[O] {
+        val impl = func
+        info =
+          info.copy(className = func.getClass.getName)
+            .addParameters("input" -> input)
+        override def create() = func(input.get)
+      }
+    }
+  }
+  implicit class ProducerBuilder2[I1, I2, O](func: (I1, I2) => O) {
+    def withInputs(
+      input1: Producer[I1],
+      input2: Producer[I2]
+    ) = {
+      new ProducerBuilder[O] {
+        val impl = func
+        info =
+          info.copy(className = func.getClass.getName)
+            .addParameters("input1" -> input1, "input2" -> input2)
+        override def create() = func(input1.get, input2.get)
+      }
+    }
+  }
 }
