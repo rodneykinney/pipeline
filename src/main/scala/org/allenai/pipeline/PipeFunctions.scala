@@ -33,9 +33,8 @@ object PipeFunctions {
     )(
       implicit
       pipeline: Pipeline
-    ) = {
+    ) =
       pipeline.persist(build, io)
-    }
     def create(): T
     lazy val build = {
       val name = usage.firstExteriorMethod.map(_._2.name).getOrElse(impl.getClass.getName)

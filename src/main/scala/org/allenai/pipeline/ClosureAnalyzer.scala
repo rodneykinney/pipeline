@@ -1,16 +1,16 @@
 package org.allenai.pipeline
 
-import org.allenai.common.Resource
+import java.io.ByteArrayOutputStream
 
+import org.allenai.common.Resource
 import org.apache.commons.io.IOUtils
 import org.objectweb.asm.Opcodes._
-import org.objectweb.asm.tree.ClassNode
+import org.objectweb.asm.tree._
 import org.objectweb.asm.{ ClassReader, ClassVisitor, MethodVisitor, Type }
 
+import scala.collection.JavaConverters._
 import scala.collection.mutable.{ ListBuffer, Map => MMap, Set => MSet }
 import scala.runtime.VolatileObjectRef
-
-import java.io.ByteArrayOutputStream
 
 object ClosureAnalyzer {
 
@@ -279,6 +279,25 @@ object ClosureAnalyzer {
     }
   }
 
+  def classForInternalName(owner: String) = {
+    Class.forName(
+      owner.replace('/', '.'),
+      false,
+      Thread.currentThread.getContextClassLoader
+    )
+  }
+
+  class UsageNode extends ClassNode(ASM4) {
+    def findMethods(filter: MethodInsnNode => Boolean) = {
+      findInsnsAllMethods.collect { case m: MethodInsnNode if filter(m) => m }
+    }
+    def insnsInMethod(node: MethodNode) = node.instructions.toArray.iterator
+
+    def findInsnsAllMethods =
+      methods.asScala.asInstanceOf[Iterable[MethodNode]].iterator
+        .flatMap(insnsInMethod)
+  }
+
 }
 
 class ClosureAnalyzer(val closure: AnyRef) {
@@ -286,6 +305,25 @@ class ClosureAnalyzer(val closure: AnyRef) {
   import org.allenai.pipeline.ClosureAnalyzer._
 
   require(isClosure(closure.getClass), s"${closure.getClass} is not an anonymous closure")
+
+  val classInfo = MMap.empty[Class[_], UsageNode]
+  def loadClass(cls: Class[_]) = {
+    val node = new UsageNode()
+    getClassReader(cls).accept(node, 0)
+    classInfo(cls) = node
+  }
+  loadClass(closure.getClass)
+  for (innerNode <- classInfo(closure.getClass).innerClasses.asScala.asInstanceOf[Iterable[InnerClassNode]]) {
+    loadClass(classForInternalName(innerNode.name))
+  }
+  {
+    var outer = classInfo(closure.getClass).outerClass
+    while (outer != null && outer.contains("$anonfun$")) {
+      val cls = classForInternalName(outer)
+      loadClass(cls)
+      outer = classInfo(cls).outerClass
+    }
+  }
 
   private val outerClassesAndObjects = getOuterClassesAndObjects(closure)
 
@@ -306,7 +344,21 @@ class ClosureAnalyzer(val closure: AnyRef) {
     usages.toMap
   }
 
-  def firstExteriorMethod = {
+  def firstExteriorMethod: Option[(Class[_], MethodId)] = {
+    def namedMethod(m: MethodInsnNode) =
+      m.name != "<init>" && !m.name.startsWith("apply")
+    val extMethods = for {
+      cls <- innerClosureClasses.iterator ++ List(closure.getClass).iterator
+      method <- classInfo(cls).findMethods(namedMethod)
+    } yield {
+      val owner = classForInternalName(method.owner)
+      val name = method.name
+      (owner, MethodId(name, method.desc))
+    }
+    if (extMethods.hasNext) Some(extMethods.next) else None
+  }
+
+  def firstExteriorMethod2 = {
     val m = for {
       (cls, ClassUsage(_, fields, methods)) <- classUsages if isExternalClass(cls)
     } yield {
