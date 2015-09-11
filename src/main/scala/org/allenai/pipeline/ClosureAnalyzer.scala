@@ -218,9 +218,9 @@ object ClosureAnalyzer {
 
   /** Return a list of classes that represent closures enclosed in the given closure object.
     */
-  def getInnerClosureClasses(obj: AnyRef): List[Class[_]] = {
-    val seen = MSet[Class[_]](obj.getClass)
-    var stack = List[Class[_]](obj.getClass)
+  def getInnerClosureClasses(cls: Class[_]): List[Class[_]] = {
+    val seen = MSet[Class[_]](cls)
+    var stack = List[Class[_]](cls)
     while (stack.nonEmpty) {
       val cr = getClassReader(stack.head)
       stack = stack.tail
@@ -231,7 +231,7 @@ object ClosureAnalyzer {
         stack = cls :: stack
       }
     }
-    (seen - obj.getClass).toList
+    (seen - cls).toList
   }
 
   private class ReturnStatementFinder extends ClassVisitor(ASM4) {
@@ -291,11 +291,34 @@ object ClosureAnalyzer {
     def findMethods(filter: MethodInsnNode => Boolean) = {
       findInsnsAllMethods.collect { case m: MethodInsnNode if filter(m) => m }
     }
-    def insnsInMethod(node: MethodNode) = node.instructions.toArray.iterator
+    def insnNodes(node: MethodNode) = node.instructions.toArray
 
-    def findInsnsAllMethods =
-      methods.asScala.asInstanceOf[Iterable[MethodNode]].iterator
-        .flatMap(insnsInMethod)
+    def methodNodes = methods.asScala.asInstanceOf[Iterable[MethodNode]]
+
+    def findInsnsAllMethods = methodNodes.iterator.flatMap(insnNodes)
+
+    // Return Some(method) if this is a wrapper around a single method,
+    // e.g. val closure = System.out.println _
+    // A wrapper will have only "apply" methods, each of which has a single methodInsn
+    def singleWrappedMethod = {
+      val applyMethods = methodNodes.filter(m => m.name == "apply" || m.name.startsWith("apply$"))
+      if (applyMethods.size == methods.size()) {
+        val methodInsns = applyMethods.map(m => insnNodes(m).collect { case m: MethodInsnNode => m })
+        if (methodInsns.forall(_.size == 1)) {
+          def namedMethod(m: MethodInsnNode) =
+            m.name != "<init>" && !m.name.startsWith("apply")
+          val extMethod = for {
+            m <- methodInsns
+            insn <- m if namedMethod(insn)
+          } yield insn
+          extMethod.headOption
+        } else {
+          None
+        }
+      } else {
+        None
+      }
+    }
   }
 
 }
@@ -312,15 +335,10 @@ class ClosureAnalyzer(val closure: AnyRef) {
     getClassReader(cls).accept(node, 0)
     classInfo(cls) = node
   }
-  private def loadInnerClassesOf(cls: Class[_]): Unit =
-    for (inner <- classInfo(cls).innerClasses.asScala.asInstanceOf[Iterable[InnerClassNode]] if inner.outerName != null) {
-      val innerClass = classForInternalName(inner.name)
-      loadClass(innerClass)
-      loadInnerClassesOf(innerClass)
-    }
 
   loadClass(closure.getClass)
-  loadInnerClassesOf(closure.getClass)
+  val innerClosureClasses = getInnerClosureClasses(closure.getClass)
+  innerClosureClasses.foreach(loadClass)
 
   {
     var outer = classInfo(closure.getClass).outerClass
@@ -336,8 +354,6 @@ class ClosureAnalyzer(val closure: AnyRef) {
   def outerClosureObjects = outerClassesAndObjects.map(_._2)
 
   def outerClosureClasses = outerClassesAndObjects.map(_._1)
-
-  val innerClosureClasses = getInnerClosureClasses(closure)
 
   val classUsages = {
     val transitive = outerClosureClasses.toSet ++ innerClosureClasses.toSet
