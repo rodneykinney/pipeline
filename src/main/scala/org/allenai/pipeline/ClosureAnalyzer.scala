@@ -307,15 +307,21 @@ class ClosureAnalyzer(val closure: AnyRef) {
   require(isClosure(closure.getClass), s"${closure.getClass} is not an anonymous closure")
 
   val classInfo = MMap.empty[Class[_], UsageNode]
-  def loadClass(cls: Class[_]) = {
+  private def loadClass(cls: Class[_]) = {
     val node = new UsageNode()
     getClassReader(cls).accept(node, 0)
     classInfo(cls) = node
   }
+  private def loadInnerClassesOf(cls: Class[_]): Unit =
+    for (inner <- classInfo(cls).innerClasses.asScala.asInstanceOf[Iterable[InnerClassNode]] if inner.outerName != null) {
+      val innerClass = classForInternalName(inner.name)
+      loadClass(innerClass)
+      loadInnerClassesOf(innerClass)
+    }
+
   loadClass(closure.getClass)
-  for (innerNode <- classInfo(closure.getClass).innerClasses.asScala.asInstanceOf[Iterable[InnerClassNode]]) {
-    loadClass(classForInternalName(innerNode.name))
-  }
+  loadInnerClassesOf(closure.getClass)
+
   {
     var outer = classInfo(closure.getClass).outerClass
     while (outer != null && outer.contains("$anonfun$")) {
@@ -352,7 +358,7 @@ class ClosureAnalyzer(val closure: AnyRef) {
       method <- classInfo(cls).findMethods(namedMethod)
     } yield {
       val owner = classForInternalName(method.owner)
-      val name = method.name
+      val name = cleanMethodName(method.name)
       (owner, MethodId(name, method.desc))
     }
     if (extMethods.hasNext) Some(extMethods.next) else None
@@ -366,6 +372,15 @@ class ClosureAnalyzer(val closure: AnyRef) {
       (cls, methods.head)
     }
     m.headOption
+  }
+
+  def cleanMethodName(name: String) = {
+    val index = name.indexOf("$anonfun$")
+    if (index >= 0) {
+      name.drop(index + 9).dropWhile(_ == '$').takeWhile(_ != '$')
+    } else {
+      name
+    }
   }
 
   val (fieldsReferenced, classesReferenced) = {
