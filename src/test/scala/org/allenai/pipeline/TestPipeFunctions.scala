@@ -8,45 +8,36 @@ import scala.util.Random
 
 class TestPipeFunctions extends UnitSpec {
 
-  import IoHelpers._
   import PipeFunctions._
   import TestFunctionsInObject._
 
   def newPipeline = Pipeline(new File("pipeline-output"))
 
-  "PipeFunctions" should "convert no-arg functions" in {
+  "PipeFunctions" should "handle basic functions" in {
     val pipeline = Pipeline(new File("pipeline-output"))
-    pipeline.Persist.Collection.asText[Double](rng.withNoInputs)
-  }
+    val rng = (randomNumbers _).withNoInputs
+    val exp = (takeExp _).withInput("input" -> rng)
+    val log = (takeLog _).withInput("input" -> exp)
+    val multiplied = (multiplyLists _).withInputs("first" -> exp, "second" -> log)
 
-  it should "convert single-arg functions" in {
-    val pipeline = newPipeline
-    val exp = (expOfList _).withInput(rng.withNoInputs)
+    def checkInfo[T](p: Producer[T], name: String)(
+      params: (String, String)*
+    )(
+      deps: (String, Producer[_])*
+    ) = {
+      p.stepInfo.className should equal(name)
+      p.stepInfo.parameters.toSet should equal(params.toSet)
+      p.stepInfo.dependencies.toSet should equal(deps.toSet)
+    }
 
-    val log = (logOfList _).withInput(exp)
+    checkInfo(rng, "randomNumbers")()()
+    checkInfo(exp, "takeExp")()("input" -> rng)
+    checkInfo(log, "takeLog")()("input" -> exp)
+    checkInfo(multiplied, "multiplyLists")()("first" -> exp, "second" -> log)
 
-    pipeline.Persist.Collection.asText[Double](log)
-  }
-
-  it should "convert two-arg functions" in {
-    val pipeline = newPipeline
-
-    val exp = (expOfList _).withInput(rng.withNoInputs)
-
-    val log = (logOfList _).withInput(exp)
-
-    val multiplied = (multiplyLists _).withInputs(exp, log)
-    pipeline.Persist.Collection.asText[Double](multiplied)
-  }
-
-  it should "persist producers" in {
-    implicit val pipeline = newPipeline
-
-    val exp = (expOfList _)
-      .withInput(rng.withNoInputs)
-      .persisted(LineCollectionIo.text[Double])
-
-    pipeline.persistedSteps.values should contain(exp)
+    an[Exception] should be thrownBy {
+      val addRand = (addRandom _).withInput("input" -> multiplied)
+    }
   }
 
   def runAndOpen(pipeline: Pipeline): Unit = {
@@ -56,13 +47,13 @@ class TestPipeFunctions extends UnitSpec {
 }
 
 object TestFunctionsInObject {
-  val seed = 55
-  val rng = () => {
-    val rand = new Random(seed)
+  def randomNumbers() = {
+    val rand = new Random(55)
     (0 to 10).map(i => rand.nextDouble())
   }
-  def expOfList(d: Iterable[Double]) = d.map(math.exp)
-  def logOfList(d: Iterable[Double]) = d.map(math.log)
+  def takeExp(d: Iterable[Double]) = d.map(math.exp)
+  def takeLog(d: Iterable[Double]) = d.map(math.log)
   def multiplyLists(d1: Iterable[Double], d2: Iterable[Double]) =
     d1.zip(d2).map { case (x, y) => x * y }
+  def addRandom(d: Iterable[Double]) = d.zip(randomNumbers()).map { case (a, b) => a + b }
 }

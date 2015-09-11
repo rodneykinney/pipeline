@@ -51,7 +51,8 @@ libraryDependencies ++= Seq(
   awsJavaSdk,
   parserCombinators,
   apacheCommonsLang,
-  reflectasm
+  asm,
+  asmTree
 )
 
 // To create release zip: sbt universal:packageBin

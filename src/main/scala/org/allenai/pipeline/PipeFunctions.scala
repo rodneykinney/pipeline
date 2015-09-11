@@ -8,11 +8,14 @@ object PipeFunctions {
 
   implicit def Build[T](builder: ProducerBuilder[T]): Producer[T] = builder.build
 
-  trait ProducerBuilder[T] {
+  abstract class ProducerBuilder[T](
+      val impl: AnyRef,
+      val inputs: (String, Producer[_])*
+  ) {
     outer =>
+    val usage = new ClosureAnalyzer(impl)
     protected[this] var info: PipelineStepInfo = PipelineStepInfo("")
-    val impl: AnyRef
-    lazy val usage = new ClosureAnalyzer(impl)
+
     def withName(name: String) = {
       info = info.copy(className = name)
       this
@@ -35,8 +38,11 @@ object PipeFunctions {
     }
     def create(): T
     lazy val build = {
-      usage
-      val localInfo = info
+      val name = usage.firstExteriorMethod.map(_._2.name).getOrElse(impl.getClass.getName)
+      val localInfo = info.copy(
+        className = name,
+        dependencies = inputs.toMap
+      )
       new Producer[T] {
         override def create = outer.create()
         override def stepInfo = localInfo
@@ -45,36 +51,25 @@ object PipeFunctions {
   }
 
   implicit class ProducerBuilder0[T](func: () => T) {
-    def withNoInputs = new ProducerBuilder[T] {
-      val impl = func
-      info =
-        info.copy(className = func.getClass.getName)
+    def withNoInputs = new ProducerBuilder[T](func) {
       def create() = func()
     }
   }
 
   implicit class ProducerBuilder1[I, O](func: I => O) {
-    def withInput(input: Producer[I]) = {
-      new ProducerBuilder[O] {
-        val impl = func
-        info =
-          info.copy(className = func.getClass.getName)
-            .addParameters("input" -> input)
-        override def create() = func(input.get)
+    def withInput(input: (String, Producer[I])) = {
+      new ProducerBuilder[O](func, input) {
+        override def create() = func(input._2.get)
       }
     }
   }
   implicit class ProducerBuilder2[I1, I2, O](func: (I1, I2) => O) {
     def withInputs(
-      input1: Producer[I1],
-      input2: Producer[I2]
+      input1: (String, Producer[I1]),
+      input2: (String, Producer[I2])
     ) = {
-      new ProducerBuilder[O] {
-        val impl = func
-        info =
-          info.copy(className = func.getClass.getName)
-            .addParameters("input1" -> input1, "input2" -> input2)
-        override def create() = func(input1.get, input2.get)
+      new ProducerBuilder[O](func, input1, input2) {
+        override def create() = func(input1._2.get, input2._2.get)
       }
     }
   }

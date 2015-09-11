@@ -4,9 +4,10 @@ import org.allenai.common.Resource
 
 import org.apache.commons.io.IOUtils
 import org.objectweb.asm.Opcodes._
-import org.objectweb.asm.{ClassReader, ClassVisitor, MethodVisitor, Type}
+import org.objectweb.asm.tree.ClassNode
+import org.objectweb.asm.{ ClassReader, ClassVisitor, MethodVisitor, Type }
 
-import scala.collection.mutable.{ListBuffer, Map => MMap, Set => MSet}
+import scala.collection.mutable.{ ListBuffer, Map => MMap, Set => MSet }
 import scala.runtime.VolatileObjectRef
 
 import java.io.ByteArrayOutputStream
@@ -73,7 +74,7 @@ object ClosureAnalyzer {
     }
   }
 
-  case class ClassUsage(transitive: Boolean, fieldsAccessed: Set[String] = Set(), methodsInvoked:Set[MethodId] = Set()) {
+  case class ClassUsage(transitive: Boolean, fieldsAccessed: Set[String] = Set(), methodsInvoked: Set[MethodId] = Set()) {
     def addFieldAccessed(name: String) = this.copy(fieldsAccessed = this.fieldsAccessed + name)
     def addMethodInvoked(id: MethodId) = this.copy(methodsInvoked = this.methodsInvoked + id)
   }
@@ -82,8 +83,9 @@ object ClosureAnalyzer {
   class ClassUsageAnalyzer(
     usages: MMap[Class[_], ClassUsage],
     transitive: Class[_] => Boolean,
-    handleMethod: MethodId => Boolean = m => true)
-    extends ClassVisitor(ASM4) {
+    handleMethod: MethodId => Boolean = m => true
+  )
+      extends ClassVisitor(ASM4) {
 
     private def loadClass(owner: String) = Class.forName(owner.replace('/', '.'), false, Thread.currentThread.getContextClassLoader)
 
@@ -93,7 +95,7 @@ object ClosureAnalyzer {
       desc: String,
       sig: String,
       exceptions: Array[String]
-      ): MethodVisitor = {
+    ): MethodVisitor = {
 
       // If we are told to visit only a certain method and this is not the one, ignore it
       if (!handleMethod(MethodId(name, desc))) {
@@ -135,8 +137,6 @@ object ClosureAnalyzer {
     }
   }
 
-
-
   /** Helper class to identify a method. */
   case class MethodIdentifier[T](cls: Class[T], name: String, desc: String)
 
@@ -146,8 +146,8 @@ object ClosureAnalyzer {
     fields: MMap[Class[_], MSet[String]] = MMap.empty[Class[_], MSet[String]],
     visitedMethods: MSet[MethodIdentifier[_]] = MSet.empty,
     dependentClasses: MSet[Class[_]] = MSet.empty
-    )
-    extends ClassVisitor(ASM4) {
+  )
+      extends ClassVisitor(ASM4) {
 
     private def loadClass(owner: String) = Class.forName(owner.replace('/', '.'), false, Thread.currentThread.getContextClassLoader)
 
@@ -157,7 +157,7 @@ object ClosureAnalyzer {
       desc: String,
       sig: String,
       exceptions: Array[String]
-      ): MethodVisitor = {
+    ): MethodVisitor = {
 
       // If we are told to visit only a certain method and this is not the one, ignore it
       if (!handleMethod(name, desc)) {
@@ -306,6 +306,16 @@ class ClosureAnalyzer(val closure: AnyRef) {
     usages.toMap
   }
 
+  def firstExteriorMethod = {
+    val m = for {
+      (cls, ClassUsage(_, fields, methods)) <- classUsages if isExternalClass(cls)
+    } yield {
+      require(methods.size <= 1, s"Multiple methods invoked by $cls")
+      (cls, methods.head)
+    }
+    m.headOption
+  }
+
   val (fieldsReferenced, classesReferenced) = {
     val fields = MMap[Class[_], MSet[String]](closure.getClass -> MSet.empty[String])
     val trackedClasses = outerClosureClasses.toSet ++ innerClosureClasses.toSet
@@ -340,20 +350,21 @@ class ClosureAnalyzer(val closure: AnyRef) {
     outerClosureObjects.find(_ eq value).isEmpty
   }
 
+  private def isExternalClass(cls: Class[_]) = outerClosureClasses.find(_ == cls).isEmpty
+
   private def parameterName(cls: Class[_], fieldName: String) = {
     if (fieldName.startsWith(cls.getName.replace('.', '$'))) {
       fieldName.drop(cls.getName.size).dropWhile(_ == '$').takeWhile(_ != '$')
-    }
-    else {
+    } else {
       fieldName.takeWhile(_ != '$')
     }
   }
 
   val (externalPrimitivesReferenced, externalNonPrimitivesReferenced) =
     objectsReferenced
-      .filterNot { case ((cls, fieldName), value) => isNull(value)}
-      .filter { case ((cls, fieldName), value) => isExternalRef(value)}
-      .partition { case ((cls, fieldName), value) => isPrimitive(value)}
+      .filterNot { case ((cls, fieldName), value) => isNull(value) }
+      .filter { case ((cls, fieldName), value) => isExternalRef(value) }
+      .partition { case ((cls, fieldName), value) => isPrimitive(value) }
   val parameters = {
     val params = MMap.empty[String, Any]
     for (((cls, fieldName), value) <- externalPrimitivesReferenced) {
