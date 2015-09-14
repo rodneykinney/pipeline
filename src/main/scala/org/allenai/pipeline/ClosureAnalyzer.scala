@@ -200,7 +200,7 @@ object ClosureAnalyzer {
           delegates.size match {
             case 1 => nonCore += MethodId(name, applyMethod)
             case 0 =>
-            case _ => sys.error(s"$applyMethod invoked multiple delegates: $delegates")
+            case _ => sys.error(s"Method ${applyMethod.name}${applyMethod.desc} invoked multiple delegates: $delegates")
           }
         }
       }
