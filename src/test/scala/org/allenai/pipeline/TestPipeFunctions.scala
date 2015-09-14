@@ -30,7 +30,8 @@ class TestPipeFunctions extends UnitSpec {
     checkInfo(log, "takeLog")()("input" -> exp)
 
     val tl: (Iterable[Double]) => Iterable[Double] = takeLog
-    checkInfo(tl.withInput("input" -> exp), "takeLog")()("input" -> exp)
+    val log2 = tl.withInput("input" -> exp)
+    checkInfo(log2, "takeLog")()("input" -> exp)
 
     val multiplied = (multiplyLists _).withInputs("first" -> exp, "second" -> log)
     checkInfo(multiplied, "multiplyLists")()("first" -> exp, "second" -> log)
@@ -45,7 +46,7 @@ class TestPipeFunctions extends UnitSpec {
       val rand = new Random(55)
       (0 to 10).map(i => rand.nextDouble())
     }
-    checkInfo((localRandomNumbersVal).withNoInputs.build, "localRandomNumbersVal")()()
+    checkInfo((localRandomNumbersVal).withNoInputs.build, null)()()
 
   }
 
@@ -81,7 +82,9 @@ class TestPipeFunctions extends UnitSpec {
   )(
     deps: (String, Producer[_])*
   ) = {
-    p.stepInfo.className should equal(name)
+    if (name != null) {
+      p.stepInfo.className should equal(name)
+    }
     p.stepInfo.parameters.toSet should equal(params.toSet)
     p.stepInfo.dependencies.toSet should equal(deps.toSet)
   }
