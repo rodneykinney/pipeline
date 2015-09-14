@@ -37,7 +37,7 @@ object PipeFunctions {
       pipeline.persist(build, io)
     def create(): T
     lazy val build = {
-      val name = usage.firstExteriorMethod.map(_._2.name).getOrElse(impl.getClass.getName)
+      val name = usage.firstExteriorMethod.map(_.name).getOrElse(impl.getClass.getName)
       val localInfo = info.copy(
         className = name,
         dependencies = inputs.toMap

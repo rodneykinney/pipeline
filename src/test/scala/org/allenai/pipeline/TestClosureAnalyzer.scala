@@ -42,15 +42,6 @@ class TestClosureAnalyzer extends UnitSpec {
     assert(ca3.innerClosureClasses.forall(isClosure))
     assert(ca4.innerClosureClasses.forall(isClosure))
 
-    assert(ca1.outerClosureObjects.size === 1)
-    assert(ca2.outerClosureObjects.size === 1)
-    assert(ca3.outerClosureObjects.size === 1)
-    assert(ca4.outerClosureObjects.size === 1)
-    assert(ca1.outerClosureClasses.forall(isClosure))
-    assert(ca2.outerClosureClasses.forall(isClosure))
-    assert(ca3.outerClosureClasses.forall(isClosure))
-    assert(ca4.outerClosureClasses.forall(isClosure))
-
     checkRefs(ca1)()()
     checkRefs(ca2)()()
     checkRefs(ca3)()()
@@ -68,14 +59,6 @@ class TestClosureAnalyzer extends UnitSpec {
     val ca2 = new ClosureAnalyzer(closure2)
     val ca3 = new ClosureAnalyzer(closure3)
     val ca4 = new ClosureAnalyzer(closure4)
-
-    // These do not have $outer pointers because they reference only local variables
-    assert(ca1.outerClosureObjects.size === 1)
-    assert(ca2.outerClosureObjects.size === 1)
-    // These closures do have $outer pointers
-    // because they ultimately reference the closure that defines this test (see FunSuite#test)
-    assert(ca3.outerClosureObjects.size === 2)
-    assert(ca4.outerClosureObjects.size === 2)
 
     checkRefs(ca1)()()
     checkRefs(ca2)("localValue" -> localValue)()
@@ -129,8 +112,6 @@ class TestClosureAnalyzer extends UnitSpec {
     checkRefs(ca5)()()
     checkRefs(ca6)("localValue2" -> localValue2)()
 
-    checkClasses(ca1)()
-    checkClasses(ca5)(classOf[NonPrimitive])
   }
 
   it should "detect non-primitive references in basic closures" in {
@@ -269,14 +250,6 @@ class TestClosureAnalyzer extends UnitSpec {
     checkRefs(ca6)("delta" -> 55)()
     checkRefs(ca7)()(true)
 
-    checkClasses(ca1)(ObjectWithMethod.getClass)
-    checkClasses(ca2)(ObjectWithMethod.getClass)
-    checkClasses(ca3)(ObjectWithMethod.getClass)
-    checkClasses(ca4)(ObjectWithMethod.getClass)
-    checkClasses(ca5)(ObjectWithMethod.getClass)
-    checkClasses(ca6)()
-    checkClasses(ca7)(classOf[NonPrimitive])
-
     wrappedNonEmpty(ca1)
     wrappedNonEmpty(ca2)
     wrappedNonEmpty(ca3)
@@ -299,9 +272,6 @@ class TestClosureAnalyzer extends UnitSpec {
     checkRefs(ca1)()()
     checkRefs(ca2)("localValue" -> localValue)()
     checkRefs(ca3)()(true)
-    checkClasses(ca1)(classOf[NonPrimitive])
-    checkClasses(ca2)(classOf[NonPrimitive])
-    checkClasses(ca3)(classOf[NonPrimitive], this.getClass)
   }
 
   it should "find references in inner classes" in {
@@ -314,14 +284,12 @@ class TestClosureAnalyzer extends UnitSpec {
 
     val ca1 = new ClosureAnalyzer(ObjectWithMethod.apply _)
     checkRefs(ca1)(expected)(true)
-    checkClasses(ca1)(ObjectWithMethod.getClass)
 
     object ObjectExtendingFunction extends (Int => Int) {
       def apply(i: Int) = i + localValue
     }
     val ca2 = new ClosureAnalyzer(ObjectExtendingFunction)
     checkRefs(ca2)(expected)()
-    checkClasses(ca2)()
 
     object ObjectWithUsedMember {
       val x = 55
@@ -330,7 +298,6 @@ class TestClosureAnalyzer extends UnitSpec {
     }
     val ca3 = new ClosureAnalyzer(ObjectWithUsedMember.apply _)
     checkRefs(ca3)(expected)(true)
-    checkClasses(ca3)(ObjectWithUsedMember.getClass)
 
     def curried(delta: Int)(x: Int, y: Int) = math.max(x, y) + delta
     checkRefs(new ClosureAnalyzer(curried(55) _))()(true)
@@ -438,9 +405,6 @@ class TestClosureAnalyzer extends UnitSpec {
     ca.parameters.toSet should equal(expectedPrimitives.toSet)
     ca.externalNonPrimitivesReferenced.nonEmpty should equal(hasExternalObjectRefs)
   }
-
-  private def checkClasses(ca: ClosureAnalyzer)(expectedClasses: Class[_]*) =
-    ca.classesReferenced should equal(expectedClasses.toSet)
 
   private def wrappedEmpty(ca: ClosureAnalyzer) = ca.classInfo(ca.closure.getClass).singleWrappedMethod should be(empty)
   private def wrappedNonEmpty(ca: ClosureAnalyzer) = ca.classInfo(ca.closure.getClass).singleWrappedMethod should not be(empty)
