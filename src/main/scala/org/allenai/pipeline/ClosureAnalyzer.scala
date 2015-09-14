@@ -5,10 +5,10 @@ import org.allenai.common.Resource
 import org.apache.commons.io.IOUtils
 import org.objectweb.asm.Opcodes._
 import org.objectweb.asm.tree._
-import org.objectweb.asm.{ClassReader, ClassVisitor, MethodVisitor, Type}
+import org.objectweb.asm.{ ClassReader, ClassVisitor, MethodVisitor, Type }
 
 import scala.collection.JavaConverters._
-import scala.collection.mutable.{ListBuffer, Map => MMap, Set => MSet}
+import scala.collection.mutable.{ ListBuffer, Map => MMap, Set => MSet }
 import scala.runtime.VolatileObjectRef
 
 import java.io.ByteArrayOutputStream
@@ -111,23 +111,6 @@ object ClosureAnalyzer {
     (seen - cls).toList
   }
 
-  private class ReturnStatementFinder extends ClassVisitor(ASM4) {
-    override def visitMethod(access: Int, name: String, desc: String,
-      sig: String, exceptions: Array[String]): MethodVisitor = {
-      if (name.contains("apply")) {
-        new MethodVisitor(ASM4) {
-          override def visitTypeInsn(op: Int, tp: String) {
-            if (op == NEW && tp.contains("scala/runtime/NonLocalReturnControl")) {
-              sys.error("Return statements not allowed")
-            }
-          }
-        }
-      } else {
-        new MethodVisitor(ASM4) {}
-      }
-    }
-  }
-
   private class InnerClosureFinder(output: MSet[Class[_]]) extends ClassVisitor(ASM4) {
     var myName: String = null
 
@@ -164,7 +147,7 @@ object ClosureAnalyzer {
     )
   }
 
-  class UsageNode extends ClassNode(ASM4) {
+  class ClosureNode extends ClassNode(ASM4) {
     def insnNodesIn(node: MethodNode) = node.instructions.toArray
 
     def methodNodes = methods.asScala.asInstanceOf[Iterable[MethodNode]]
@@ -194,14 +177,13 @@ object ClosureAnalyzer {
       }
     }
 
-    def invokedBy(node: MethodNode) = insnNodesIn(node).collect { case m: MethodInsnNode => m}
+    def invokedBy(node: MethodNode) = insnNodesIn(node).collect { case m: MethodInsnNode => m }
 
     def delegateOf(node: MethodNode) = {
       val methodCalls = invokedBy(node)
       if (methodCalls.size == 1 && methodCalls.head.owner == name) {
         methodCalls.headOption
-      }
-      else {
+      } else {
         None
       }
     }
@@ -222,9 +204,10 @@ object ClosureAnalyzer {
           }
         }
       }
-      val core = applyMethods.map(m => MethodId(name, m)).filterNot(nonCore)
-      require(core.size == 1, s"Found multiple methods that don't delegate: $core")
-      core.head
+      val core = applyMethods.map(m => MethodId(name, m)).filterNot(nonCore).toSet
+      val coreMethods = methodNodes.filter(m => core(MethodId(name, m)))
+      require(coreMethods.size == 1, s"Found multiple methods that don't delegate: $core")
+      coreMethods.head
     }
 
     def referencesClass(cls: Class[_]) = {
@@ -251,21 +234,22 @@ class ClosureAnalyzer(val closure: AnyRef) {
 
   require(isClosure(closure.getClass), s"${closure.getClass} is not an anonymous closure")
 
-  val classInfo = MMap.empty[Class[_], UsageNode]
+  val classInfo = MMap.empty[Class[_], ClosureNode]
 
   private def loadClass(cls: Class[_]) = {
-    val node = new UsageNode()
+    val node = new ClosureNode()
     getClassReader(cls).accept(node, 0)
     classInfo(cls) = node
   }
 
   loadClass(closure.getClass)
   val closureInfo = classInfo(closure.getClass)
+  closureInfo.coreLogicMethod
   val innerClosureClasses = getInnerClosureClasses(closure.getClass)
   innerClosureClasses.foreach(loadClass)
 
   {
-    var outer = classInfo(closure.getClass).outerClass
+    var outer = closureInfo.outerClass
     while (outer != null && outer.contains("$anonfun$")) {
       val cls = classForInternalName(outer)
       loadClass(cls)
@@ -274,21 +258,16 @@ class ClosureAnalyzer(val closure: AnyRef) {
   }
 
   def firstExteriorMethod: Option[MethodIdentifier[_]] =
-    classInfo(closure.getClass).singleWrappedMethod.map { m =>
+    closureInfo.singleWrappedMethod.map { m =>
       MethodIdentifier(classForInternalName(m.owner), cleanMethodName(m.name), m.desc)
     }
 
-
   def isDelegate = {
     innerClosureClasses.size == 0 &&
-      classInfo(closure.getClass).singleWrappedMethod.size == 1
+      closureInfo.singleWrappedMethod.size == 1
   }
 
   def implementingMethod = closureInfo.coreLogicMethod
-
-  def isPure = {
-    false
-  }
 
   def cleanMethodName(name: String) = {
     val index = name.indexOf("$anonfun$")
@@ -308,8 +287,9 @@ class ClosureAnalyzer(val closure: AnyRef) {
   }
 
   val objectsReferenced = {
-    for (f <- closure.getClass.getDeclaredFields
-      if f.getName != "serialVersionUID") yield {
+    for (
+      f <- closure.getClass.getDeclaredFields if f.getName != "serialVersionUID"
+    ) yield {
       f.setAccessible(true)
       (f.getName, f.get(closure))
     }
@@ -323,7 +303,7 @@ class ClosureAnalyzer(val closure: AnyRef) {
   }
 
   val (externalPrimitivesReferenced, externalNonPrimitivesReferenced) =
-    objectsReferenced.partition { case (name, value) => isPrimitive(value)}
+    objectsReferenced.partition { case (name, value) => isPrimitive(value) }
 
   val parameters = {
     val params = MMap.empty[String, Any]
@@ -334,7 +314,6 @@ class ClosureAnalyzer(val closure: AnyRef) {
     }
     params.toMap
   }
-
 
   def checkNoBadReferences() = {
     if (externalNonPrimitivesReferenced.nonEmpty) {

@@ -28,6 +28,7 @@ class TestClosureAnalyzer extends UnitSpec {
         }
       }
     }
+
     val ca1 = new ClosureAnalyzer(closure1)
     val ca2 = new ClosureAnalyzer(closure2)
     val ca3 = new ClosureAnalyzer(closure3)
@@ -65,7 +66,6 @@ class TestClosureAnalyzer extends UnitSpec {
     checkRefs(ca3)()(true)
     checkRefs(ca4)()(true)
   }
-
 
   it should "analyze closures defined within methods" in {
     val localValue = aPrimitiveValue
@@ -115,24 +115,24 @@ class TestClosureAnalyzer extends UnitSpec {
   }
 
   it should "detect non-primitive references in basic closures" in {
-    self:Unit =>
-    val closure1 = () => this
-    val closure2 = () => methodReturningNonPrimitive()
-    val closure3 = () => methodReturningPrimitive()
-    val closure4 = () => aNonPrimitiveValue
-    val closure5 = () => aPrimitiveValue
+    self: Unit =>
+      val closure1 = () => this
+      val closure2 = () => methodReturningNonPrimitive()
+      val closure3 = () => methodReturningPrimitive()
+      val closure4 = () => aNonPrimitiveValue
+      val closure5 = () => aPrimitiveValue
 
-    val ca1 = new ClosureAnalyzer(closure1)
-    val ca2 = new ClosureAnalyzer(closure2)
-    val ca3 = new ClosureAnalyzer(closure3)
-    val ca4 = new ClosureAnalyzer(closure4)
-    val ca5 = new ClosureAnalyzer(closure5)
+      val ca1 = new ClosureAnalyzer(closure1)
+      val ca2 = new ClosureAnalyzer(closure2)
+      val ca3 = new ClosureAnalyzer(closure3)
+      val ca4 = new ClosureAnalyzer(closure4)
+      val ca5 = new ClosureAnalyzer(closure5)
 
-    checkRefs(ca1)()(true)
-    checkRefs(ca2)()(true)
-    checkRefs(ca3)()(true)
-    checkRefs(ca4)()(true)
-    checkRefs(ca5)()(true)
+      checkRefs(ca1)()(true)
+      checkRefs(ca2)()(true)
+      checkRefs(ca3)()(true)
+      checkRefs(ca4)()(true)
+      checkRefs(ca5)()(true)
   }
 
   it should "find references in basic closures" in {
@@ -161,7 +161,7 @@ class TestClosureAnalyzer extends UnitSpec {
 
   it should "find core logic method" in {
     val f1 = new ClosureAnalyzer(() => 4)
-    val f2 = new ClosureAnalyzer((i: Int) => (0 to i).map(x => x*x + 10))
+    val f2 = new ClosureAnalyzer((i: Int) => (0 to i).map(x => x * x + 10))
     val f3 = new ClosureAnalyzer((i: Int, j: Int) => i + j)
     val f4 = new ClosureAnalyzer(ObjectWithMethod.apply _)
     val f5 = new ClosureAnalyzer(ObjectWithMethod.curriedMethod(55) _)
@@ -172,7 +172,7 @@ class TestClosureAnalyzer extends UnitSpec {
     val f10 = new ClosureAnalyzer((s: String) => s.length)
     val f11 = new ClosureAnalyzer(ObjectWithMethod.addTogether _)
 
-    def findCore(f: ClosureAnalyzer) = f.closureInfo.coreLogicMethod should not be(null)
+    def findCore(f: ClosureAnalyzer) = f.closureInfo.coreLogicMethod should not be (null)
 
     findCore(f1)
     findCore(f2)
@@ -249,14 +249,6 @@ class TestClosureAnalyzer extends UnitSpec {
     checkRefs(ca5)()()
     checkRefs(ca6)("delta" -> 55)()
     checkRefs(ca7)()(true)
-
-    wrappedNonEmpty(ca1)
-    wrappedNonEmpty(ca2)
-    wrappedNonEmpty(ca3)
-    wrappedNonEmpty(ca4)
-    wrappedNonEmpty(ca5)
-    wrappedEmpty(ca6)
-    wrappedNonEmpty(ca7)
   }
 
   it should "find parameters in functions of non-primitive arguments" in {
@@ -285,11 +277,13 @@ class TestClosureAnalyzer extends UnitSpec {
     val ca1 = new ClosureAnalyzer(ObjectWithMethod.apply _)
     checkRefs(ca1)(expected)(true)
 
-    object ObjectExtendingFunction extends (Int => Int) {
-      def apply(i: Int) = i + localValue
+    an[Exception] should be thrownBy {
+      object ObjectExtendingFunction extends (Int => Int) {
+        def apply(i: Int) = i + localValue
+      }
+      val ca2 = new ClosureAnalyzer(ObjectExtendingFunction)
+      checkRefs(ca2)(expected)()
     }
-    val ca2 = new ClosureAnalyzer(ObjectExtendingFunction)
-    checkRefs(ca2)(expected)()
 
     object ObjectWithUsedMember {
       val x = 55
@@ -336,8 +330,8 @@ class TestClosureAnalyzer extends UnitSpec {
     val ca1 = new ClosureAnalyzer(closure1)
     val ca2 = new ClosureAnalyzer(closure2)
 
-    ca1.implementingMethod should not be(null)
-    ca2.implementingMethod should not be(null)
+    ca1.implementingMethod should not be (null)
+    ca2.implementingMethod should not be (null)
 
     checkRefs(ca1)("localValue" -> localValue)()
     checkRefs(ca2)("localValue" -> localValue)()
@@ -358,9 +352,6 @@ class TestClosureAnalyzer extends UnitSpec {
 
       val ca1 = new ClosureAnalyzer(inner1)
       val ca2 = new ClosureAnalyzer(inner2)
-
-      wrappedEmpty(ca1)
-      wrappedEmpty(ca2)
 
       checkRefs(ca1)(
         "a" -> a,
@@ -405,9 +396,6 @@ class TestClosureAnalyzer extends UnitSpec {
     ca.parameters.toSet should equal(expectedPrimitives.toSet)
     ca.externalNonPrimitivesReferenced.nonEmpty should equal(hasExternalObjectRefs)
   }
-
-  private def wrappedEmpty(ca: ClosureAnalyzer) = ca.classInfo(ca.closure.getClass).singleWrappedMethod should be(empty)
-  private def wrappedNonEmpty(ca: ClosureAnalyzer) = ca.classInfo(ca.closure.getClass).singleWrappedMethod should not be(empty)
 }
 
 class NonPrimitive(val id: Int = -1) {
@@ -432,5 +420,4 @@ object ObjectWithMethod {
 
   def handCurriedMethod(delta: Int) = (x: Int) => x + delta
 }
-
 
