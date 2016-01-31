@@ -48,6 +48,7 @@ libraryDependencies ++= Seq(
   allenAiCommon,
   allenAiTestkit % "test",
   scalaReflection,
+  scalaCompiler,
   awsJavaSdk,
   parserCombinators,
   apacheCommonsLang,
